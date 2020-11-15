@@ -20,17 +20,17 @@ library(ggcorrplot)
 
 
 ```{r}
-# dt <- read.csv("summer-products-with-rating-and-performance_2020-08", sep="")
+wish <- read.csv("summer-products-with-rating-and-performance_2020-08.csv")
 # cmd + option + c
-str(dt)
+wish
 ```
 
 
 
 
 ```{r}
-dt <- dt %>% select(-crawl_month,-theme,-product_id,-product_picture,-product_url,-merchant_id,-merchant_profile_picture,-merchant_info_subtitle,-merchant_name,-merchant_title,-urgency_text,-title_orig, -currency_buyer)
-summary(dt)
+wish <- wish %>% select(-title, -tags, -crawl_month,-theme,-product_id,-product_picture,-product_url,-merchant_id,-merchant_profile_picture,-merchant_info_subtitle,-merchant_name,-merchant_title,-urgency_text,-title_orig,-shipping_option_name, -currency_buyer)
+summary(wish)
 ```
 
 # Data Cleaning
@@ -40,20 +40,20 @@ summary(dt)
 ```{r}
 # 
 # cmd + shift + m
-dt <- dt %>% mutate(has_urgency_banner = ifelse(is.na(has_urgency_banner),'0',has_urgency_banner))
+wish <- wish %>% mutate(has_urgency_banner = ifelse(is.na(has_urgency_banner),'0',has_urgency_banner))
 ```
 
 
 3. clean the sizes 
 ```{r}
-dt %>% select(product_variation_size_id) %>% unique()
+wish %>% select(product_variation_size_id) %>% unique()
 
 ```
 
 
 
 ```{r}
-dt <- dt %>%
+wish <- wish %>%
     mutate(product_variation_size_id = tolower(product_variation_size_id)) %>%
     mutate(product_variation_size_id = gsub(pattern='.',replacement='',
                                             x=product_variation_size_id,fixed=TRUE)) %>%
@@ -67,25 +67,21 @@ dt <- dt %>%
                                               'xs',product_variation_size_id)) %>%
     mutate(product_variation_size_id = str_replace(product_variation_size_id,' ','')) %>%
     mutate(product_variation_size_id = ifelse(product_variation_size_id %in% c('s','xs','m','l','xl'),
-                                              product_variation_size_id,'NotIdentified'))
+                                              product_variation_size_id,'One-sized'))
 
 ```
 
 
 
 ```{r}
-dt %>% select(product_variation_size_id) %>% unique()
+wish %>% select(product_variation_size_id) %>% unique()
 ```
 
-4. clean the tags (set by the seller, NLP may be helpful to separate the words). Here we are oversimplifying it by counting the number of tags contained. 
-```{r}
-dt <- dt %>% mutate(tags = sapply(strsplit(tags,','),length))
-```
 
 5. fix the color. group the similar clours together. <br>
 One thing might be worth looking at is ... whether special colors (not the mainstream ones) actually sell better, because they make people feel special?
 ```{r}
-dt <- dt %>% 
+wish <- wish %>% 
     mutate(product_color = tolower(product_color)) %>%
     mutate(product_color = ifelse(grepl(pattern='red|burgundy|claret|wine|jasper',product_color),
                                   'red',product_color)) %>%
@@ -112,29 +108,27 @@ dt <- dt %>%
     mutate(product_color = ifelse(grepl(pattern='floral|multicolor|camouflage|rainbow|star',
                                         product_color),'multicolor',product_color))
 
-```
-
-
-```{r}
-dt <- dt %>% select(-title)
-
+wish['product_color'][wish['product_color']==""] <- "Not defined"
+unique(wish['product_color'])
 ```
 
 
 ```{r}
 # check for the number of unique values for each column 
 # looks fine - we are good for the next steps
-ulst <- lapply(dt, unique)
+ulst <- lapply(wish, unique)
 lengths(ulst)
 ```
+
+
 
 # Feature Engineering 
 1. Check for correlations 
 ```{r}
 
-# cnr = dt %>% select(where(is.numeric)) %>% cor()
+# cnr = wish %>% select(where(is.numeric)) %>% cor()
 # #p-values matrix
-# p.values = cor_pmat(dt %>% select(where(is.numeric)))
+# p.values = cor_pmat(wish %>% select(where(is.numeric)))
 # 
 # ggcorrplot(cnr, hc.order = TRUE, type = "lower",
 #    outline.col = "black",
@@ -142,9 +136,9 @@ lengths(ulst)
 #    colors = c('#d8b365', "white", "#de2d26"),p.mat=p.values,lab = TRUE)
 
 # install.packages("corrplot")
-# rquery.cormat(dt, type="upper")
+# rquery.cormat(wish, type="upper")
 
-res <- dt %>% drop_na(rating_five_count) %>% select(where(is.numeric)) %>% cor()
+res <- wish %>% drop_na(rating_five_count) %>% select(where(is.numeric)) %>% cor()
 round(res, 2)
 ```
 
@@ -153,9 +147,9 @@ round(res, 2)
 
 ```{r}
 
-cnr = dt %>% drop_na(rating_five_count) %>% select(where(is.numeric)) %>% cor()
+cnr = wish %>% drop_na(rating_five_count) %>% select(where(is.numeric)) %>% cor()
 #p-values matrix
-p.values = cor_pmat(dt %>% select(where(is.numeric)))
+p.values = cor_pmat(wish %>% select(where(is.numeric)))
 
 ggcorrplot(cnr, hc.order = TRUE, type = "lower",
    outline.col = "black",
@@ -184,11 +178,11 @@ corrplot(res, type = "upper", order = "hclust",
 
 ```{r}
 
-dt <- dt %>% mutate(badges_count=factor(badges_count),
+wish <- wish %>% mutate(badges_count=factor(badges_count),
                     shipping_option_price=factor(shipping_option_price)) %>% 
     select(-inventory_total)
 
-dt <- dt %>% mutate_if(is.character,as.factor)
+wish <- wish %>% mutate_if(is.character,as.factor)
 ```
 
 
@@ -196,11 +190,11 @@ dt <- dt %>% mutate_if(is.character,as.factor)
 # Model building with h2o
 hasn't started yet because can't install the package
 ```{r}
-# train_split <- sample(seq_len(nrow(dt)),size=round(0.75 * nrow(dt)))
+# train_split <- sample(seq_len(nrow(wish)),size=round(0.75 * nrow(wish)))
 # 
-# train <- dt[train_split, ]
+# train <- wish[train_split, ]
 # train <- as.h2o(train)
-# test <- dt[-train_split, ]
+# test <- wish[-train_split, ]
 # test <- as.h2o(test)
 
 ```
@@ -229,7 +223,7 @@ hasn't started yet because can't install the package
 
 ```{r}
 # check for the number of unique values for each column 
-# ulst <- lapply(dt, unique)
+# ulst <- lapply(wish, unique)
 # lengths(ulst)
 ```
 
