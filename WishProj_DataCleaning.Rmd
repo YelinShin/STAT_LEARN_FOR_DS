@@ -120,7 +120,20 @@ ulst <- lapply(wish, unique)
 lengths(ulst)
 ```
 
+# correlation plot
 
+```{r}
+library(corrplot)
+# finding correlation between numeric columns and charges
+
+origin_colname = colnames(wish)
+colnames(wish) = c('price','retail','sold_ct','ad_boost','rate','rate_ct','rate5','rate4','rate3','rate2','rate1','badge_ct','bg_local','bg_quality','bg_fastship','color','size','inventory','ship_price','is_express','ship_from','total_invent','has_bg_urgency','origin','seller_rate_ct','seller_rate','has_seller_propic')
+numeric.column <- sapply(wish, is.numeric)
+correlation <- cor(wish[, numeric.column],  use="pairwise.complete.obs")
+corrplot(correlation, method = "color")
+
+
+```
 
 # Feature Engineering 
 1. Check for correlations 
