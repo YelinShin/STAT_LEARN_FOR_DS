@@ -11,6 +11,7 @@ output:
 
 ```{r}
 options(warn=-1)
+library(dplyr)
 library(tidyverse)
 library(GGally)
 library(plotly)
@@ -29,7 +30,9 @@ wish
 
 
 ```{r}
-wish <- wish %>% select(-title, -tags, -crawl_month,-theme,-product_id,-product_picture,-product_url,-merchant_id,-merchant_profile_picture,-merchant_info_subtitle,-merchant_name,-merchant_title,-urgency_text,-title_orig,-shipping_option_name, -currency_buyer)
+drops <- c("title", "tags","crawl_month","theme","product_id","product_picture","product_url","merchant_id","merchant_profile_picture","merchant_info_subtitle","merchant_name","merchant_title","urgency_text","title_orig","shipping_option_name", "currency_buyer")
+wish = wish[ , !(names(wish) %in% drops)]
+
 summary(wish)
 ```
 
@@ -45,13 +48,6 @@ wish <- wish %>% mutate(has_urgency_banner = ifelse(is.na(has_urgency_banner),'0
 
 
 3. clean the sizes 
-```{r}
-wish %>% select(product_variation_size_id) %>% unique()
-
-```
-
-
-
 ```{r}
 wish <- wish %>%
     mutate(product_variation_size_id = tolower(product_variation_size_id)) %>%
@@ -74,7 +70,7 @@ wish <- wish %>%
 
 
 ```{r}
-wish %>% select(product_variation_size_id) %>% unique()
+unique(wish["product_variation_size_id"])
 ```
 
 
@@ -109,7 +105,8 @@ wish <- wish %>%
                                         product_color),'multicolor',product_color))
 
 wish['product_color'][wish['product_color']==""] <- "Not defined"
-unique(wish['product_color'])
+
+wish['origin_country'][wish['origin_country']==""] <- "Not defined"
 ```
 
 
@@ -127,7 +124,7 @@ library(corrplot)
 # finding correlation between numeric columns and charges
 
 origin_colname = colnames(wish)
-colnames(wish) = c('price','retail','sold_ct','ad_boost','rate','rate_ct','rate5','rate4','rate3','rate2','rate1','badge_ct','bg_local','bg_quality','bg_fastship','color','size','inventory','ship_price','is_express','ship_from','total_invent','has_bg_urgency','origin','seller_rate_ct','seller_rate','has_seller_propic')
+colnames(wish) = c('price','retail','sold_ct','ad_boost','rate','rate_ct','rate5','rate4','rate3','rate2','rate1','badge_ct','bg_local','bg_quality','bg_fastship','color','size','inventory','ship_price','is_express','able_country','total_invent','has_bg_urgency','origin','seller_rate_ct','seller_rate','has_seller_propic')
 numeric.column <- sapply(wish, is.numeric)
 correlation <- cor(wish[, numeric.column],  use="pairwise.complete.obs")
 corrplot(correlation, method = "color")
