@@ -24,7 +24,6 @@ library(stringr)
 
 ```{r}
 wish <- read.csv('summer-products-with-rating-and-performance_2020-08.csv')
-wish
 ```
 
 ```{r}
@@ -39,9 +38,9 @@ summary(wish)
 1. Though there are 45 missing values in the details of rating count. It doesn't influence the rating count and average rating we want to look at, so maybe we can keep them for now (and it is very likely that we will drop the details of the rating count columns later) <br>
 2. Replace 'na' in 'has_urgency_banner' with 0
 ```{r}
-wish <- wish %>% mutate(has_urgency_banner = ifelse(is.na(has_urgency_banner), '0', has_urgency_banner))
+wish <- wish %>% mutate(has_urgency_banner = ifelse(is.na(has_urgency_banner), 0, has_urgency_banner))
+wish$has_urgency_banner <- as.integer(wish$has_urgency_banner)
 ```
-
 
 3. clean the sizes 
 ```{r}
@@ -121,14 +120,38 @@ lengths(ulst)
 
 7. factors
 
-We check how many factors in each factor columns because we need to be careful when we split data. Error might occur if factor is in test set but not in training set.
+We check how many factors in each factor columns because we need to be careful when we split data. Error might occur if factor is in the test set but not in the training set. We also examine columns with only 0 and 1 records.
 
 ```{r}
 str(wish)
 ```
 
-
 ```{r}
+wish %>% 
+  group_by(uses_ad_boosts) %>%
+  summarise(no_rows = length(uses_ad_boosts)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badges_count) %>%
+  summarise(no_rows = length(badges_count)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badge_local_product) %>%
+  summarise(no_rows = length(badge_local_product)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badge_product_quality) %>%
+  summarise(no_rows = length(badge_product_quality)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badge_fast_shipping) %>%
+  summarise(no_rows = length(badge_fast_shipping)) %>%
+  arrange(desc(no_rows)) 
+
 wish %>% 
   group_by(product_color) %>%
   summarise(no_rows = length(product_color)) %>%
@@ -140,6 +163,11 @@ wish %>%
   arrange(desc(no_rows)) 
 
 wish %>% 
+  group_by(shipping_is_express) %>%
+  summarise(no_rows = length(shipping_is_express)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
   group_by(has_urgency_banner) %>%
   summarise(no_rows = length(has_urgency_banner)) %>%
   arrange(desc(no_rows)) 
@@ -148,6 +176,17 @@ wish %>%
   group_by(origin_country) %>%
   summarise(no_rows = length(origin_country)) %>%
   arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(merchant_has_profile_picture) %>%
+  summarise(no_rows = length(merchant_has_profile_picture)) %>%
+  arrange(desc(no_rows)) 
+```
+
+shipping_is_express has too many zero, so we decided to exclude this column. Also, product_color and origin_country might cause an error in prediction, so we need to change some record.
+
+```{r}
+wish <- select(wish, -c(shipping_is_express))
 ```
 
 Only 7 colors have more than 100 records so We decided to keep only 8 factors of color, i.e. black, white, blue, red, green, yellow, pink and others.
@@ -176,16 +215,26 @@ wish %>%
   arrange(desc(no_rows)) 
 ```
 
+
+```{r}
+str(wish)
+```
+
+change columns' name
+
+```{r}
+origin_colname <- colnames(wish)
+colnames(wish) <- c('price', 'retail', 'sold_ct', 'ad_boost', 'rate', 'rate_ct', 'rate5', 'rate4', 'rate3', 'rate2', 'rate1', 'badge_ct', 'bg_local', 'bg_quality', 'bg_fastship', 'color', 'size', 'inventory', 'ship_price', 'able_country', 'total_invent', 'has_bg_urgency', 'origin', 'seller_rate_ct', 'seller_rate', 'has_seller_propic')
+```
+
 # correlation plot
-```{r, fig.width = 8, fig.height = 8}
+```{r, fig.width = 6, fig.height = 6}
 library(corrplot)
 # finding correlation between numeric columns and charges
 
-origin_colname <- colnames(wish)
-colnames(wish) <- c('price', 'retail', 'sold_ct', 'ad_boost', 'rate', 'rate_ct', 'rate5', 'rate4', 'rate3', 'rate2', 'rate1', 'badge_ct', 'bg_local', 'bg_quality', 'bg_fastship', 'color', 'size', 'inventory', 'ship_price', 'is_express', 'able_country', 'total_invent', 'has_bg_urgency', 'origin', 'seller_rate_ct', 'seller_rate', 'has_seller_propic')
 numeric.column <- sapply(wish, is.numeric)
-correlation <- cor(wish[, numeric.column], use = 'pairwise.complete.obs')
-corrplot(correlation, method = 'color')
+corr <- cor(wish[, numeric.column]) #, use = 'pairwise.complete.obs'
+corrplot(corr, method = 'color')
 ```
 
 # Feature Engineering 
@@ -235,31 +284,14 @@ corrplot(res, type = 'upper', order = 'hclust',
 ```{r}
 #wish <- wish %>% mutate(badge_ct = factor(badge_ct), ship_price = factor(ship_price)) # %>% select(-total_invent)
 
+wish$has_bg_urgency <- as.integer(wish$has_bg_urgency)
 wish <- wish %>% mutate_if(is.character, as.factor)
+
 str(wish)
 ```
 
+We plotted histogram to see the distribution of our response.
 
-# Model building with h2o
-hasn't started yet because can't install the package
-```{r}
-# train_split <- sample(seq_len(nrow(wish)),size=round(0.75 * nrow(wish)))
-# 
-# train <- wish[train_split, ]
-# train <- as.h2o(train)
-# test <- wish[-train_split, ]
-# test <- as.h2o(test)
-```
-
-```{r}
-set.seed(123)
-# split a training set and a test set with 50:50 ratio
-train_rows <- sample(1:nrow(wish), 0.5 * nrow(wish))
-wish.train <- wish[train_rows, ] # wish training set
-wish.test <- wish[-train_rows, ]
-```
-
-# Simple Regression
 ```{r}
 library(rcompanion)
 plotNormalHistogram(wish$sold_ct, main = 'Sold Count Histogram', xlab = 'Sold Count')
@@ -267,8 +299,20 @@ plotNormalHistogram(wish$sold_ct, main = 'Sold Count Histogram', xlab = 'Sold Co
 plotNormalHistogram(log(wish$sold_ct), main = 'log(Sold Count) Histogram', xlab = 'log(Sold Count)') 
 ```
 
+We split our dataset into a training set and a test set with 50:50 ratio.
+
+```{r}
+set.seed(123)
+train_rows <- sample(1:nrow(wish), 0.5 * nrow(wish))
+wish.train <- wish[train_rows, ] # wish training set
+wish.test <- wish[-train_rows, ]
+```
+
+# Simple Linear Regression
+
 ```{r}
 library(leaps)
+# exhaustive search
 regfit.full <- regsubsets(log(sold_ct) ~ ., data = wish.train)
 reg.summary <- summary(regfit.full)
 
@@ -326,11 +370,11 @@ The best linear regression model is the model 3 which is from backward stepwise 
 
 ```{r}
 set.seed(123)
-drops2 <- c('sold_ct')
-x.train <- wish.train[, !(names(wish.train) %in% drops2)]
+
+x.train <- select(wish.train, -c(sold_ct))
 x.train <- data.matrix(x.train)
 y.train <- wish.train[, 'sold_ct']
-x.test <- wish.test[, !(names(wish.test) %in% drops2)]
+x.test <- select(wish.test, -c(sold_ct))
 ```
 
 We fitted a lasso model because it has variable selection property.
@@ -358,18 +402,10 @@ r2_L
 We tried using PCR model and PLS model too.
 
 ```{r}
-wish %>% 
-  group_by(is_express) %>%
-  summarise(no_rows = length(is_express)) %>%
-  arrange(desc(no_rows)) 
-```
-
-```{r}
 library(pls)
 set.seed(123)
-drops3 <- c('is_express')
 # perform cross-validation to chose M
-pcr_model <- pcr(log(sold_ct) ~ ., data = wish.train[, !(names(wish.train) %in% drops3)], scale = TRUE, validation = "CV")
+pcr_model <- pcr(log(sold_ct) ~ ., data = wish.train, scale = TRUE, validation = "CV")
 summary(pcr_model)
 validationplot(pcr_model, val.type = 'MSEP')
 
@@ -386,7 +422,7 @@ r2_pcr
 ```{r}
 set.seed(123)
 # perform cross-validation to chose M
-pls_model <- plsr(log(sold_ct) ∼ ., data = wish.train[, !(names(wish.train) %in% drops3)], scale = TRUE, validation = "CV")
+pls_model <- plsr(log(sold_ct) ∼ ., data = wish.train, scale = TRUE, validation = "CV")
 summary(pls_model)
 validationplot(pls_model, val.type = 'MSEP')
 
@@ -550,6 +586,13 @@ ggplot(mse_table2, aes(x = method2, y = mse_all2)) + geom_bar(stat = 'identity')
 
 
 
+
+# Model building with h2o
+hasn't started yet because can't install the package
+```{r}
+# train.h2o <- as.h2o(wish.train)
+# test.h2o <- as.h2o(wish.test)
+```
 
 
 
