@@ -1,0 +1,922 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+# TL;dr
+1. Many features need to be removed before any analysis are conducted. <br>
+2. product variation inventory, merchant rating and merchang rating count seem to be the most important features. Those features about badges may also be helpful but there may be collinearity. <br>
+
+```{r}
+options(warn = -1)
+library(dplyr)
+library(tidyr)
+#library(tidyverse)
+library(GGally)
+library(plotly)
+library(cowplot)
+library(ggcorrplot)
+library(stringr)
+```
+
+
+```{r}
+wish <- read.csv('summer-products-with-rating-and-performance_2020-08.csv')
+```
+
+```{r}
+drops <- c('title', 'tags', 'crawl_month', 'theme', 'product_id', 'product_picture', 'product_url', 'merchant_id', 'merchant_profile_picture', 'merchant_info_subtitle', 'merchant_name', 'merchant_title', 'urgency_text', 'title_orig', 'shipping_option_name', 'currency_buyer')
+wish <- wish[, !(names(wish) %in% drops)]
+
+summary(wish)
+```
+
+```{r}
+# unique(wish$sold_ct)
+library(dplyr)
+wish  %>% group_by(sold_ct)  %>%summarize(count=n())
+# maybe replace sold_ct 1~10 by 10 and those >50000 by 50000, and do a multi categories prediction? 
+# seems like we are facing an inbalanced multiclass classification problem 
+```
+
+# Data Cleaning
+##checking NA's
+1. Though there are 45 missing values in the details of rating count. It doesn't influence the rating count and average rating we want to look at, so maybe we can keep them for now (and it is very likely that we will drop the details of the rating count columns later) <br>
+2. Replace 'na' in 'has_urgency_banner' with 0
+```{r}
+wish <- wish %>% mutate(has_urgency_banner = ifelse(is.na(has_urgency_banner), 0, has_urgency_banner))
+wish$has_urgency_banner <- as.integer(wish$has_urgency_banner)
+```
+
+3. clean the sizes 
+```{r}
+wish <- wish %>%
+  mutate(product_variation_size_id = tolower(product_variation_size_id)) %>%
+  mutate(product_variation_size_id = gsub(pattern = '.', replacement = '',
+                                          x = product_variation_size_id, fixed = TRUE)) %>%
+  mutate(product_variation_size_id = gsub(pattern = '(size-*)|(size)', replacement = '',
+                                          x = product_variation_size_id)) %>%
+  mutate(product_variation_size_id = gsub(pattern = '.+[-]', replacement = '',
+                                          x = product_variation_size_id)) %>%
+  mutate(product_variation_size_id = ifelse(grepl(pattern = 'xl',product_variation_size_id),
+                                            'xl', product_variation_size_id)) %>%
+  mutate(product_variation_size_id = ifelse(grepl(pattern = 'xs', product_variation_size_id),
+                                            'xs', product_variation_size_id)) %>%
+  mutate(product_variation_size_id = str_replace(product_variation_size_id, ' ', '')) %>%
+  mutate(product_variation_size_id = ifelse(product_variation_size_id %in% c('s', 'xs', 'm', 'l', 'xl'),
+                                            product_variation_size_id, 'One-sized'))
+```
+
+```{r}
+unique(wish['product_variation_size_id'])
+```
+
+
+5. fix the color. group the similar clours together. <br>
+One thing might be worth looking at is ... whether special colors (not the mainstream ones) actually sell better, because they make people feel special?
+```{r}
+wish <- wish %>% 
+    mutate(product_color = tolower(product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'red|burgundy|claret|wine|jasper', product_color),
+                                  'red', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'blue|navy', product_color),
+                                  'blue', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'white', product_color),
+                                  'white', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'green|army', product_color),
+                                  'green', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'black', product_color),
+                                  'black', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'yellow|leopard|gold', product_color),
+                                  'yellow', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'pink|rose', product_color),
+                                  'pink', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'grey|gray|silver', product_color),
+                                  'gray', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'purple|violet', product_color),
+                                  'purple', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'orange|apricot', product_color),
+                                  'orange', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'beige|nude|ivory|coffee|brown|khaki|camel',
+                                        product_color), 'khaki', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'floral|multicolor|camouflage|rainbow|star',
+                                        product_color), 'multicolor', product_color))
+
+wish['product_color'][wish['product_color'] == ''] <- 'Not defined'
+
+wish['origin_country'][wish['origin_country'] == ''] <- 'Not defined'
+```
+
+6. handle with NA in rating columns
+```{r}
+wish$rating_five_count[which(is.na(wish$rating_five_count))] <- 0
+wish$rating_four_count[which(is.na(wish$rating_four_count))] <- 0
+wish$rating_three_count[which(is.na(wish$rating_three_count))] <- 0
+wish$rating_two_count[which(is.na(wish$rating_two_count))] <- 0
+wish$rating_one_count[which(is.na(wish$rating_one_count))] <- 0
+wish$rating[which(wish$rating_count == 0)] <- 0
+```
+
+```{r}
+# check for the number of unique values for each column 
+# looks fine - we are good for the next steps
+ulst <- lapply(wish, unique)
+lengths(ulst)
+```
+
+7. factors
+
+We check how many factors in each factor columns because we need to be careful when we split data. Error might occur if factor is in the test set but not in the training set. We also examine columns with only 0 and 1 records.
+
+```{r}
+str(wish)
+```
+
+```{r}
+wish %>% 
+  group_by(uses_ad_boosts) %>%
+  summarise(no_rows = length(uses_ad_boosts)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badges_count) %>%
+  summarise(no_rows = length(badges_count)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badge_local_product) %>%
+  summarise(no_rows = length(badge_local_product)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badge_product_quality) %>%
+  summarise(no_rows = length(badge_product_quality)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(badge_fast_shipping) %>%
+  summarise(no_rows = length(badge_fast_shipping)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(product_color) %>%
+  summarise(no_rows = length(product_color)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(product_variation_size_id) %>%
+  summarise(no_rows = length(product_variation_size_id)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(shipping_is_express) %>%
+  summarise(no_rows = length(shipping_is_express)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(has_urgency_banner) %>%
+  summarise(no_rows = length(has_urgency_banner)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(origin_country) %>%
+  summarise(no_rows = length(origin_country)) %>%
+  arrange(desc(no_rows)) 
+
+wish %>% 
+  group_by(merchant_has_profile_picture) %>%
+  summarise(no_rows = length(merchant_has_profile_picture)) %>%
+  arrange(desc(no_rows)) 
+```
+
+shipping_is_express has too many zero, so we decided to exclude this column. Also, product_color and origin_country might cause an error in prediction, so we need to change some record.
+
+```{r}
+wish <- select(wish, -c(shipping_is_express))
+```
+
+Only 7 colors have more than 100 records so We decided to keep only 8 factors of color, i.e. black, white, blue, red, green, yellow, pink and others.
+
+```{r}
+color_list <- c('black', 'white', 'blue', 'red', 'green', 'yellow', 'pink')
+wish$product_color[!(wish$product_color %in% color_list)] <- 'others'
+
+wish %>% 
+  group_by(product_color) %>%
+  summarise(no_rows = length(product_color)) %>%
+  arrange(desc(no_rows)) %>%
+  filter(no_rows > 100)
+```
+
+We decided to change origin to CN and others.
+
+```{r}
+wish$origin_country <- as.character(wish$origin_country)
+wish$origin_country[which(wish$origin_country != 'CN')] <- 'others'
+wish$origin_country[is.na(wish$origin_country)] <- 'others'
+
+wish %>% 
+  group_by(origin_country) %>%
+  summarise(no_rows = length(origin_country)) %>%
+  arrange(desc(no_rows)) 
+```
+
+
+```{r}
+# created a new column and changed every sold_ct < 10 to 10
+wish$sold_cate <- ifelse(wish$sold_ct < 10, 10, wish$sold_ct )
+wish$sold_cate <- ifelse(wish$sold_cate > 50000, 50000, wish$sold_cate )
+wish$sold_cate <- as.factor(wish$sold_cate)
+
+ulst <- lapply(wish, unique)
+lengths(ulst)
+``` 
+ 
+ 
+```{r}
+str(wish)
+```
+
+change columns' name
+
+```{r}
+origin_colname <- colnames(wish)
+colnames(wish) <- c('price', 'retail', 'sold_ct', 'ad_boost', 'rate', 'rate_ct', 'rate5', 'rate4', 'rate3', 'rate2', 'rate1', 'badge_ct', 'bg_local', 'bg_quality', 'bg_fastship', 'color', 'size', 'inventory', 'ship_price', 'able_country', 'total_invent', 'has_bg_urgency', 'origin', 'seller_rate_ct', 'seller_rate', 'has_seller_propic')
+```
+
+# correlation plot
+```{r, fig.width = 6, fig.height = 6}
+library(corrplot)
+# finding correlation between numeric columns and charges
+
+numeric.column <- sapply(wish, is.numeric)
+corr <- cor(wish[, numeric.column]) #, use = 'pairwise.complete.obs'
+corrplot(corr, method = 'color')
+```
+
+# Feature Engineering 
+1. Check for correlations 
+```{r}
+# cnr = wish %>% select(where(is.numeric)) %>% cor()
+# #p-values matrix
+# p.values = cor_pmat(wish %>% select(where(is.numeric)))
+# 
+# ggcorrplot(cnr, hc.order = TRUE, type = "lower",
+#    outline.col = "black",
+#    ggtheme = standard_theme,
+#    colors = c('#d8b365', "white", "#de2d26"),p.mat=p.values,lab = TRUE)
+
+# install.packages("corrplot")
+# rquery.cormat(wish, type="upper")
+
+#res <- wish %>% drop_na(rate5) %>% select(where(is.numeric)) %>% cor() # I have error for this line
+res <- wish %>% drop_na(rate5) %>% select_if(is.numeric) %>% cor()
+round(res, 2)
+```
+
+```{r, fig.width = 6, fig.height = 6}
+
+#cnr <- wish %>% drop_na(rate5) %>% select(where(is.numeric)) %>% cor()
+cnr <- wish %>% drop_na(rate5) %>% select_if(is.numeric) %>% cor()
+#p-values matrix
+p.values <- cor_pmat(wish %>% select_if(is.numeric))
+
+ggcorrplot(cnr, hc.order = TRUE, type = 'lower',
+           outline.col = 'black',
+           # ggtheme = standard_theme,
+           colors = c('#d8b365', 'white', '#de2d26'), p.mat = p.values) #, lab = TRUE)
+```
+
+Zooming in the plot and we can find - <br>
+- strong positive correlation between: shipping option price vs price vs product variation inventory, merchant has profile picture vs shipping option price, rating_X_count has strong correlations with each other, badge fast shipping vs shipping is express (keeping one is enough), countries ship to vs shipping is express , badge product quality vs badge local product, rating vs badges count <br>
+- strong negative correlation between: inventory total vs shipping is express vs price <br>
+- unexpected correlations: price vs retail price (a lot of discount?), ad boost has barely no correlations with rating or units sold
+```{r, fig.width = 8, fig.height = 8}
+library(corrplot)
+corrplot(res, type = 'upper', order = 'hclust', 
+         tl.col = "black", tl.srt = 45)
+
+```
+
+```{r}
+#wish <- wish %>% mutate(badge_ct = factor(badge_ct), ship_price = factor(ship_price)) # %>% select(-total_invent)
+
+wish$has_bg_urgency <- as.integer(wish$has_bg_urgency)
+wish <- wish %>% mutate_if(is.character, as.factor)
+
+str(wish)
+```
+
+We plotted histogram to see the distribution of our response.
+
+```{r}
+library(rcompanion)
+plotNormalHistogram(wish$sold_ct, main = 'Sold Count Histogram', xlab = 'Sold Count')
+# since our sold_ct is right-skewed, we try performing log transfromation on it to make it normal distribution
+plotNormalHistogram(log(wish$sold_ct), main = 'log(Sold Count) Histogram', xlab = 'log(Sold Count)') 
+```
+
+We split our dataset into a training set and a test set with 50:50 ratio.
+
+```{r}
+set.seed(123)
+train_rows <- sample(1:nrow(wish), 0.5 * nrow(wish))
+wish.train <- wish[train_rows, ] # wish training set
+wish.test <- wish[-train_rows, ]
+```
+
+# Simple Linear Regression
+
+```{r}
+library(leaps)
+# exhaustive search
+regfit.full <- regsubsets(log(sold_ct) ~ ., data = wish.train)
+reg.summary <- summary(regfit.full)
+
+n.full <- c(which.min(reg.summary$cp), which.min(reg.summary$bic), which.max(reg.summary$adjr2))
+coef(regfit.full, min(n.full))
+```
+
+```{r}
+# forward stepwise selection
+regfit.fwd <- regsubsets(log(sold_ct) ~ ., data = wish.train, method = 'forward')
+n.fwd <- c(which.min(summary(regfit.fwd)$cp), which.min(summary(regfit.fwd)$bic), which.max(summary(regfit.fwd)$adjr2))
+coef(regfit.fwd, min(n.fwd))
+
+# backward stepwise selection
+regfit.bwd <- regsubsets(log(sold_ct) ~ ., data = wish.train, method = 'backward')
+n.bwd <- c(which.min(summary(regfit.bwd)$cp), which.min(summary(regfit.bwd)$bic), which.max(summary(regfit.bwd)$adjr2))
+coef(regfit.bwd, min(n.bwd))
+```
+
+```{r}
+set.seed(123)
+
+# from exhaustive search
+model1 <- lm(log(sold_ct) ~ price + rate + rate5 + rate2 + badge_ct + size + ship_price + able_country, data = wish.train)
+# adjusted R-squared
+summary(model1)$adj.r.squared
+
+model1.pred <- predict(model1, wish.test) 
+# test mse 
+mse_model1 <- mean((log(wish.test$sold_ct) - model1.pred)^2) 
+mse_model1
+
+# from forward stepwise selection
+model2 <- lm(log(sold_ct) ~ price + rate + rate_ct + rate2 + badge_ct + size + ship_price + able_country, data = wish.train)
+# adjusted R-squared
+summary(model2)$adj.r.squared
+
+model2.pred <- predict(model2, wish.test) 
+# test mse 
+mse_model2 <- mean((log(wish.test$sold_ct) - model2.pred)^2) 
+mse_model2
+
+# from backward stepwise selection
+model3 <- lm(log(sold_ct) ~ rate + rate_ct + rate5 + rate4 + rate3 + rate2 + size + ship_price + able_country, data = wish.train)
+# adjusted R-squared
+summary(model3)$adj.r.squared
+
+model3.pred <- predict(model3, wish.test) 
+# test mse 
+mse_model3 <- mean((log(wish.test$sold_ct) - model3.pred)^2) 
+mse_model3
+```
+
+The best linear regression model is the model 3 which is from backward stepwise selection.
+
+```{r}
+set.seed(123)
+
+x.train <- select(wish.train, -c(sold_ct))
+x.train <- data.matrix(x.train)
+y.train <- wish.train[, 'sold_ct']
+x.test <- select(wish.test, -c(sold_ct))
+```
+
+We fitted a lasso model because it has variable selection property.
+
+```{r}
+library(glmnet)
+set.seed(123)
+# find optimal lambda
+lasso_model <- cv.glmnet(x.train, log(y.train), alpha = 1)
+best_lambda_L <- lasso_model$lambda.min
+
+# fit a lasso model on the training set
+lasso_model2 <- glmnet(x.train, log(y.train), alpha = 1, lambda = best_lambda_L)
+lasso.pred <- predict(lasso_model2, newx = data.matrix(x.test), s = best_lambda_L)
+# test error
+mse_L <- mean((log(wish.test$sold_ct) - lasso.pred)^2)
+mse_L
+
+# calcuate adjusted R-squared
+totalSS <- mean((log(wish.test$sold_ct) - mean(log(wish.test$sold_ct)))^2) 
+r2_L <- 1 - mse_L / totalSS 
+r2_L
+```
+
+We tried using PCR model and PLS model too.
+
+```{r}
+library(pls)
+set.seed(123)
+# perform cross-validation to chose M
+pcr_model <- pcr(log(sold_ct) ~ ., data = wish.train, scale = TRUE, validation = "CV")
+summary(pcr_model)
+validationplot(pcr_model, val.type = 'MSEP')
+
+pcr.pred <- predict(pcr_model, wish.test, ncomp = 31)
+# test error
+mse_pcr <- mean((log(wish.test$sold_ct) - pcr.pred)^2)
+mse_pcr
+
+# adjusted R-squared
+r2_pcr <- 1 - mse_pcr / totalSS 
+r2_pcr
+```
+
+```{r} 
+# can't run this so comment this piece oout
+# set.seed(123)
+# # perform cross-validation to chose M
+# pls_model <- plsr(log(sold_ct) ∼ ., data = wish.train, scale = TRUE, validation = "CV")
+# summary(pls_model)
+# validationplot(pls_model, val.type = 'MSEP')
+# 
+# # fit a PLS model on the training set
+# pls.pred <- predict(pls_model, wish.test, ncomp = 14)
+# # test error
+# mse_pls <- mean((log(wish.test$sold_ct) - pls.pred)^2)
+# mse_pls
+# 
+# # adjusted R-squared
+# r2_pls <- 1 - mse_pls / totalSS 
+# r2_pls
+```
+
+Then, we compared test MSE from each model.
+
+```{r, fig.height = 4}
+# plot all test errors
+mse_pls = 2.49
+mse_all <- c(mse_model3, mse_L, mse_pcr, mse_pls)
+mse <- formatC(mse_all, digits = 4, format = 'f')
+method <- c('Final lm', 'Lasso', 'PCR', 'PLS')
+
+mse_table <- data.frame(mse_all, method)
+mse_table$method <- factor(mse_table$method, levels = mse_table$method)
+ggplot(mse_table, aes(x = method, y = mse_all)) + geom_bar(stat = 'identity') + xlab('Method') + ylab('Test MSE') + geom_text(aes(label = mse), vjust = 1.6, color = 'white', size = 4) + theme_light(base_size = 15)
+```
+
+```{r, fig.height = 4}
+# compare adjuated R-squared
+r2_pls = 0.46
+r2 <- c(summary(model3)$adj.r.squared, r2_L, r2_pcr, r2_pls)
+r2_2 <- formatC(r2, digits = 4, format = 'f')
+
+r2_table <- data.frame(r2, method)
+r2_table$method2 <- factor(r2_table$method, levels = r2_table$method)
+
+ggplot(r2_table, aes(x = method, y = r2)) + geom_bar(stat = 'identity') + xlab('Method') + ylab('Adjusted R-Squared') + geom_text(aes(label = r2_2), vjust = 1.6, color = 'white', size = 4) + theme_light(base_size = 15)
+```
+
+
+
+Non-parametric Methods
+
+# Tree Models
+
+```{r, fig.width = 6, fig.height = 4}
+library(rpart)
+library(rpart.plot)
+set.seed(123)
+
+# doing tree regression on log(y) ~ every x
+tree.wish <- rpart(log(sold_ct) ~ ., data = wish.train) 
+summary(tree.wish)
+tree.wish$variable.importance
+
+rpart.plot(tree.wish, type = 1, extra = 1, cex = 0.75)
+
+predictions <- predict(tree.wish, wish.test)
+# summarize accuracy
+mse_tree <- mean((log(wish.test$sold_ct) - predictions)^2)
+mse_tree 
+```
+
+# bagging
+
+```{r}
+library(ipred)
+set.seed(123)
+
+bag <- bagging(
+   formula = log(sold_ct) ~ .,
+   data = wish.train,
+   nbagg = 100,  # interations included in the bagged model
+   coob = TRUE, # out of bag sample, faster than CV
+   control = rpart.control(minsplit = 2, cp = 0),
+ )
+bag
+
+# predictions
+bag_pred <- predict(bag, wish.test) 
+#mse
+mse_bag <- mean((log(wish.test$sold_ct) - bag_pred)^2)
+mse_bag
+```
+
+# random forest
+
+```{r}
+library(randomForest)
+library(ranger)
+set.seed(123)
+
+# number of features
+n_features <- length(wish.train) - 1
+
+# train a default random forest model
+rf <- ranger(
+  log(sold_ct) ~ ., 
+  data = wish.train,
+  mtry = floor(n_features / 3),
+  respect.unordered.factors = 'order',
+)
+
+# get OOB MSE
+mse_rf <- rf$prediction.error
+mse_rf
+```
+
+# GBM
+
+```{r}
+library(gbm) 
+set.seed(123)
+  
+# run a basic GBM model
+set.seed(123)  # for reproducibility
+wish_gbm <- gbm(
+  formula = log(sold_ct) ~ .,
+  data = wish.train,
+  distribution = 'gaussian',  # SSE loss function
+  n.trees = 5000,
+  shrinkage = 0.1,
+  interaction.depth = 3,
+  n.minobsinnode = 10,
+  cv.folds = 10
+)
+
+# find index for number trees with minimum CV error
+best <- which.min(wish_gbm$cv.error)
+
+# get MSE and compute RMSE
+wish_gbm$cv.error[best]
+
+# plot error curve
+perf <- gbm.perf(wish_gbm, method = 'cv')
+
+prediction_1 <- stats::predict(
+                          # the model from above
+                          object = wish_gbm, 
+                          # the testing data
+                          newdata = wish.test,
+                          # this is the number we calculated above
+                          n.trees = perf)
+
+rmse_fit1 <- Metrics::rmse(actual = log(wish.test$sold_ct), 
+                           predicted = prediction_1)
+
+mse_gbm <- rmse_fit1^2
+mse_gbm
+```
+
+```{r, fig.width = 5, fig.height = 4}
+mse_all2 <- c(mse_tree, mse_bag, mse_rf, mse_gbm)
+mse2 <- formatC(mse_all2, digits = 4, format = 'f')
+method2 <- c('Tree', 'Bagging', 'Random Forests', 'GBM')
+
+mse_table2 <- data.frame(mse_all2, method2)
+mse_table2$method2 <- factor(mse_table2$method2, levels = mse_table2$method2)
+
+ggplot(mse_table2, aes(x = method2, y = mse_all2)) + geom_bar(stat = 'identity') + xlab('Method') + ylab('Test MSE') + geom_text(aes(label = mse2), vjust = 1.6, color = 'white', size = 4) + theme_light(base_size = 15)
+```
+
+
+
+
+# Model building with h2o
+hasn't started yet because can't install the package
+```{r}
+# library(h2o)
+train_soldct <- select(wish.train, -c(sold_cate))
+test_soldct <- select(wish.test, -c(sold_cate))
+train1 <- as.h2o(train_soldct)
+test1 <- as.h2o(test_soldct)
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+automl1 <- h2o.automl(y='sold_ct',training_frame=train1,max_models=15)
+
+a1 <- automl1@leaderboard
+print(a1,n=nrow(a1))
+
+```
+
+
+
+```{r}
+train_soldcate <- select(wish.train, -c(sold_ct))
+test_soldcate <- select(wish.test, -c(sold_ct))
+train2 <- as.h2o(train_soldcate)
+test2 <- as.h2o(test_soldcate)
+
+```
+
+
+```{r}
+automl2 <- h2o.automl(y='sold_cate',training_frame=train2,max_models=15)
+a2 <- automl2@leaderboard
+print(a2, n=nrow(a2))
+
+```
+
+
+
+
+```{r}
+pred1 <- h2o.predict(automl1, test1)
+
+```
+
+
+
+
+```{r}
+pred2 <- h2o.predict(automl2, test2)
+pred2
+
+```
+
+
+
+
+```{r}
+mse_aml1 <- mean((wish.test$sold_ct - pred1)^2) 
+mse_aml1
+
+mse_aml2 <- mean((wish.test$sold_cate - pred2)^2) 
+mse_aml2
+
+```
+
+##Try with normalized data
+
+```{r}
+train_rows <- sample(1:nrow(wish), 0.5 * nrow(wish))
+wish.train <- wish[train_rows, ] # wish training set
+wish.test <- wish[-train_rows, ]
+```
+
+
+```{r}
+dt_scaled <- dt %>% mutate_if(is.numeric,~(scale(.) %>% as.vector))
+
+train_split <- sample(seq_len(nrow(dt_scaled)),size=round(0.75 * nrow(dt_scaled)))
+
+train <- dt_scaled[train_split, ]
+train <- as.h2o(train)
+test <- dt_scaled[-train_split, ]
+test <- as.h2o(test)
+
+train_rows <- sample(1:nrow(wish), 0.5 * nrow(wish))
+wish.train <- wish[train_rows, ] # wish training set
+wish.test <- wish[-train_rows, ]
+
+```
+
+
+
+
+
+```{r}
+
+
+```
+
+
+```{r}
+
+
+```
+
+
+```{r}
+
+
+```
+
+```{r}
+# try with the multiclass classification problem 
+library(e1071)  
+svm1 <- svm(sold_cate~., data = train_soldcate, method="C-classification",kernal="radial",gamma=0.1,cost=10)
+summary(svm1)
+```
+
+
+
+
+```{r}
+# https://medium.com/@ODSC/build-a-multi-class-support-vector-machine-in-r-abcdd4b7dab6 
+test_svm <- subset(test_soldcate, select = -sold_cate)
+pred <- predict(svm1, test_svm)
+xtab <- table(wish.test$sold_cate,pred)
+# the prediction data is still on probability, not classification
+xtab
+# consider using SMOTE to deal with the imbalance problem
+# https://machinelearningmastery.com/multi-class-imbalanced-classification/ I used this as a reference
+# https://medium.com/0xcode/svm-classification-algorithms-in-r-ced0ee73821 this one may also be helpful
+```
+
+
+
+```{r}
+# unique(test_soldcate$sold_cate)
+sum(pred != wish.test$sold_cate)
+nrow(wish.test)
+```
+
+# XGBoost
+
+```{r}
+library(xgboost)
+# Create numeric labels with one-hot encoding
+train_labs <- as.numeric(train_soldcate$sold_cate) - 1
+val_labs <- as.numeric(test_soldcate$sold_cate) - 1
+
+new_train <- model.matrix(~ . + 0, data = subset(train_soldcate, select = -sold_cate))
+new_val <- model.matrix(~ . + 0, data = subset(test_soldcate, select = -sold_cate))
+
+# Prepare matrices
+xgb_train <- xgb.DMatrix(data = new_train, label = train_labs)
+xgb_val <- xgb.DMatrix(data = new_val, label = val_labs)
+
+```
+
+
+```{r}
+# Set parameters(default)
+params <- list(booster = "gbtree", objective = "multi:softprob", num_class = 8, eval_metric = "mlogloss")
+
+# Calculate # of folds for cross-validation
+xgbcv <- xgb.cv(params = params, data = xgb_train, nrounds = 100, nfold = 5, showsd = TRUE, stratified = TRUE, print_every_n = 10, early_stop_round = 20, maximize = FALSE, prediction = TRUE)
+
+```
+
+
+```{r}
+# Function to compute classification error
+classification_error <- function(conf_mat) {
+  conf_mat = as.matrix(conf_mat)
+  
+  error = 1 - sum(diag(conf_mat)) / sum(conf_mat)
+  
+  return (error)
+}
+
+# Mutate xgb output to deliver hard predictions
+xgb_train_preds <- data.frame(xgbcv$pred) %>% mutate(max = max.col(., ties.method = "last"), label = train_labs + 1)
+
+# Examine output
+head(xgb_train_preds)
+
+```
+
+
+
+```{r}
+xgb_conf_mat <- table(true = train_labs + 1, pred = xgb_train_preds$max)
+
+# Error 
+cat("XGB Training Classification Error Rate:", classification_error(xgb_conf_mat), "\n")
+
+```
+
+## Predicting the test data
+```{r}
+# Create the model
+xgb_model <- xgb.train(params = params, data = xgb_train, nrounds = 100)
+
+# Predict for validation set
+xgb_val_preds <- predict(xgb_model, newdata = xgb_val)
+
+xgb_val_out <- matrix(xgb_val_preds, nrow = 8, ncol = length(xgb_val_preds) / 8) %>% 
+               t() %>%
+               data.frame() %>%
+               mutate(max = max.col(., ties.method = "last"), label = val_labs + 1) 
+
+# Confustion Matrix
+xgb_val_conf <- table(true = val_labs + 1, pred = xgb_val_out$max)
+
+cat("XGB Validation Classification Error Rate:", classification_error(xgb_val_conf), "\n")
+
+```
+
+
+
+
+```{r}
+
+
+```
+
+
+
+
+```{r}
+
+
+```
+
+
+
+
+
+
+```{r}
+train_rows <- sample(1:nrow(wish), 0.5 * nrow(wish))
+wish.train <- wish[train_rows, ] # wish training set
+wish.test <- wish[-train_rows, ]
+```
+
+
+
+
+
+```{r}
+xgb_conf_mat <- table(true = train_labs + 1, pred = xgb_train_preds$max)
+
+# Error 
+cat("XGB Training Classification Error Rate:", classification_error(xgb_conf_mat), "\n")
+
+```
+
+
+```{r}
+
+
+```
+
+
+```{r}
+
+
+```
+
+
+
+```{r}
+
+
+```
+
+
+
+
+```{r}
+
+
+```
+
+
+
+
+```{r}
+
+
+```
+
+
+
+
+```{r}
+
+
+```
+
+
+
