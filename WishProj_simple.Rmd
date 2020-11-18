@@ -587,6 +587,53 @@ ggplot(mse_table2, aes(x = method2, y = mse_all2)) + geom_bar(stat = 'identity')
 
 
 
+# svm with categorical sold_ct
+```{r}
+set.seed(1)
+
+table(wish['sold_ct']) # very unbalaned
+wish_cate = wish
+wish_cate$sold_ct_cate = wish_cate$sold_ct
+wish_cate$sold_ct_cate[which(wish_cate$sold_ct <=50)] <- 'below 50'
+wish_cate$sold_ct_cate[which(wish_cate$sold_ct >=20000)] <- 'above 20K'
+wish_cate = select(wish_cate, -sold_ct)
+wish_cate$sold_ct_cate = as.factor(wish_cate$sold_ct_cate)
+table(wish_cate$sold_ct_cate) # much better
+
+
+train_index = sample(nrow(wish_cate), 1258) #around 80% of obs
+wish.train = wish_cate[train_index, ]
+wish.test = wish_cate[-train_index, ]
+
+library(e1071)
+
+set.seed(120)
+
+tuned = tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "linear", ranges =list(cost = append(seq(0.01,10,by=0.5),10)))
+summary(tuned) #cost = 8.51 is best
+```
+
+```{r}
+lin.svm = svm(sold_ct_cate ~ ., kernel = "linear", data = wish.train, cost = 8.51)
+
+train_pred = predict(lin.svm, wish.train)
+table =table(wish.train$sold_ct_cate, train_pred)
+
+print("training error with cost = 8.51: ")
+(table[2]+table[3]) /(sum(table[1:4]))
+
+test_pred = predict(lin.svm, wish.test)
+table =table(wish.test$sold_ct_cate, test_pred)
+
+print("training error with cost = 8.51: ")
+(table[2]+table[3]) /(sum(table[1:4]))
+
+
+```
+
+
+
+
 # Model building with h2o
 hasn't started yet because can't install the package
 ```{r}
