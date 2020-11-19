@@ -586,8 +586,9 @@ ggplot(mse_table2, aes(x = method2, y = mse_all2)) + geom_bar(stat = 'identity')
 
 
 
+# svm with categorical sold_ct (data conversion in here)
 
-# svm with categorical sold_ct
+
 ```{r}
 set.seed(1)
 
@@ -598,76 +599,173 @@ wish_cate$sold_ct_cate[which(wish_cate$sold_ct <=50)] <- 'below 50'
 wish_cate$sold_ct_cate[which(wish_cate$sold_ct >=20000)] <- 'above 20K'
 wish_cate = select(wish_cate, -sold_ct)
 wish_cate$sold_ct_cate = as.factor(wish_cate$sold_ct_cate)
+wish_cate$color = as.factor(wish_cate$color)
+wish_cate$size = as.factor(wish_cate$size)
+wish_cate$origin = as.factor(wish_cate$origin)
 table(wish_cate$sold_ct_cate) # much better
 
 
-train_index = sample(nrow(wish_cate), 1258) #around 80% of obs
-wish.train = wish_cate[train_index, ]
-wish.test = wish_cate[-train_index, ]
+x1  = factor(wish_cate$sold_ct_cate, levels=  c("below 50","100","1000","5000","10000","above 20K"))
+tb = table(x1)
+par(mfrow=c(1,2))
+hist(log(wish$sold_ct),col="grey", main="log(sold_ct) as numerical")
+barplot(tb, names.arg = row.names(tb), cex.names = 0.8,main = "sold_ct as categorical",las=2)
+
+
+wish.train = wish_cate[train_rows, ]
+wish.test = wish_cate[-train_rows, ]
 
 library(e1071)
 
 set.seed(120)
 
 tuned = tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "linear", ranges =list(cost = append(seq(0.01,10,by=0.5),10)))
-summary(tuned) #cost = 8.51 is best
+summary(tuned) #cost = 1.51 is the best
 ```
 
 ```{r}
-lin.svm = svm(sold_ct_cate ~ ., kernel = "linear", data = wish.train, cost = 8.51)
+lin.svm = svm(sold_ct_cate ~ ., kernel = "linear",type="C-class", data = wish.train, cost = 1.51)
 
 train_pred = predict(lin.svm, wish.train)
 table =table(wish.train$sold_ct_cate, train_pred)
 
-print("training error with cost = 8.51: ")
+print("training error with cost = 1.51: ")
 (table[2]+table[3]) /(sum(table[1:4]))
 
 test_pred = predict(lin.svm, wish.test)
 table =table(wish.test$sold_ct_cate, test_pred)
 
-print("training error with cost = 8.51: ")
+print("training error with cost = 1.51: ")
 (table[2]+table[3]) /(sum(table[1:4]))
 
-
+#we cannot plot SVM classification plot since we have more than 2 columns
+table(wish.test$sold_ct_cate,test_pred)
 ```
-
-
-
-
-# Model building with h2o
-hasn't started yet because can't install the package
-```{r}
-# train.h2o <- as.h2o(wish.train)
-# test.h2o <- as.h2o(wish.test)
-```
-
-
-
-
-
-
-
-
 
 ```{r}
-# check for the number of unique values for each column 
-# ulst <- lapply(wish, unique)
-# lengths(ulst)
+set.seed(143)
+
+tuned = tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "radial", ranges =list(cost = append(seq(0.01,10,by=0.5),10)))
+summary(tuned) #cost = 9.51 is best
+
+table(wish.test$sold_ct_cate,test_pred)
+
+```
+
+```{r}
+rad.svm = svm(sold_ct_cate ~ ., kernel = "radial", data = wish.train, cost = 9.51)
+
+train_pred = predict(rad.svm, wish.train)
+table =table(wish.train$sold_ct_cate, train_pred)
+
+print("radical svm - training error with cost = 9.51: ")
+(table[2]+table[3]) /(sum(table[1:4]))
+
+test_pred = predict(rad.svm, wish.test)
+table =table(wish.test$sold_ct_cate, test_pred)
+
+print("radical svm - training error with cost = 9.51: ")
+(table[2]+table[3]) /(sum(table[1:4]))
+
+table(wish.test$sold_ct_cate,test_pred)
+
+```
+
+```{r}
+tune.poly = tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "poly", degree = 3, ranges =list(cost = append(seq(0.01,10,by=0.5),10)))
+summary(tuned) #cost = 9.51 is best
+```
+
+```{r}
+poly.svm = svm(sold_ct_cate ~ ., kernel = "poly", data = wish.train, degree = 3, cost = 9.51)
+
+train_pred = predict(poly.svm, wish.train)
+table =table(wish.train$sold_ct_cate, train_pred)
+
+print("poly svm - training error with cost = 9.51: ")
+(table[2]+table[3]) /(sum(table[1:4]))
+
+test_pred = predict(poly.svm, wish.test)
+table =table(wish.test$sold_ct_cate, test_pred)
+
+print("poly svm - training error with cost = 9.51: ")
+(table[2]+table[3]) /(sum(table[1:4]))
+
+table(wish.test$sold_ct_cate,test_pred)
+       
+```
+
+#XBboost
+```{r}
+library(xgboost)
+# Create numeric labels with one-hot encoding
+train_labs <- as.numeric(wish.train$sold_ct_cate) - 1
+val_labs <- as.numeric(wish.test$sold_ct_cate) - 1
+
+new_train <- model.matrix(~ . + 0, data = subset(wish.train, select = -sold_ct_cate))
+new_val <- model.matrix(~ . + 0, data = subset(wish.test, select = -sold_ct_cate))
+
+# Prepare matrices
+xgb_train <- xgb.DMatrix(data = new_train, label = train_labs)
+xgb_val <- xgb.DMatrix(data = new_val, label = val_labs)
+
+```
+
+
+```{r}
+# Set parameters(default)
+params <- list(booster = "gbtree", objective = "multi:softprob", num_class = 8, eval_metric = "mlogloss")
+
+# Calculate # of folds for cross-validation
+xgbcv <- xgb.cv(params = params, data = xgb_train, nrounds = 100, nfold = 5, showsd = TRUE, stratified = TRUE, print_every_n = 10, early_stop_round = 20, maximize = FALSE, prediction = TRUE)
+
+```
+
+
+```{r}
+# Function to compute classification error
+classification_error <- function(conf_mat) {
+  conf_mat = as.matrix(conf_mat)
+  
+  error = 1 - sum(diag(conf_mat)) / sum(conf_mat)
+  
+  return (error)
+}
+
+# Mutate xgb output to deliver hard predictions
+xgb_train_preds <- data.frame(xgbcv$pred) %>% mutate(max = max.col(., ties.method = "last"), label = train_labs + 1)
+
+# Examine output
+head(xgb_train_preds)
+
 ```
 
 
 
 ```{r}
+xgb_conf_mat <- table(true = train_labs + 1, pred = xgb_train_preds$max)
 
+# Error 
+cat("XGB Training Classification Error Rate:", classification_error(xgb_conf_mat), "\n")
 
 ```
 
-
-
-
+## Predicting the test data
 ```{r}
+# Create the model
+xgb_model <- xgb.train(params = params, data = xgb_train, nrounds = 100)
 
+# Predict for validation set
+xgb_val_preds <- predict(xgb_model, newdata = xgb_val)
+
+xgb_val_out <- matrix(xgb_val_preds, nrow = 8, ncol = length(xgb_val_preds) / 8) %>% 
+               t() %>%
+               data.frame() %>%
+               mutate(max = max.col(., ties.method = "last"), label = val_labs + 1) 
+
+# Confustion Matrix
+xgb_val_conf <- table(true = val_labs + 1, pred = xgb_val_out$max)
+
+cat("XGB Validation Classification Error Rate:", classification_error(xgb_val_conf), "\n")
 
 ```
-
-
