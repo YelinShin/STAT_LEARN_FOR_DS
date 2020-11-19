@@ -294,9 +294,9 @@ We plotted histogram to see the distribution of our response.
 
 ```{r}
 library(rcompanion)
-plotNormalHistogram(wish$sold_ct, main = 'Sold Count Histogram', xlab = 'Sold Count')
+plotNormalHistogram(wish$sold_ct, main = 'sold_ct Histogram', xlab = 'sold_ct')
 # since our sold_ct is right-skewed, we try performing log transfromation on it to make it normal distribution
-plotNormalHistogram(log(wish$sold_ct), main = 'log(Sold Count) Histogram', xlab = 'log(Sold Count)') 
+plotNormalHistogram(log(wish$sold_ct), main = 'log(sold_ct) Histogram', xlab = 'log(sold_ct)') 
 ```
 
 We split our dataset into a training set and a test set with 50:50 ratio.
@@ -589,109 +589,128 @@ ggplot(mse_table2, aes(x = method2, y = mse_all2)) + geom_bar(stat = 'identity')
 # svm with categorical sold_ct (data conversion in here)
 
 
-```{r}
-set.seed(1)
+```{r, fig.width = 10, fig.height = 4}
+set.seed(123)
 
 table(wish['sold_ct']) # very unbalaned
-wish_cate = wish
-wish_cate$sold_ct_cate = wish_cate$sold_ct
-wish_cate$sold_ct_cate[which(wish_cate$sold_ct <=50)] <- 'below 50'
-wish_cate$sold_ct_cate[which(wish_cate$sold_ct >=20000)] <- 'above 20K'
-wish_cate = select(wish_cate, -sold_ct)
-wish_cate$sold_ct_cate = as.factor(wish_cate$sold_ct_cate)
-wish_cate$color = as.factor(wish_cate$color)
-wish_cate$size = as.factor(wish_cate$size)
-wish_cate$origin = as.factor(wish_cate$origin)
+wish_cate <- wish
+wish_cate$sold_ct_cate <- wish_cate$sold_ct
+wish_cate$sold_ct_cate[which(wish_cate$sold_ct <= 50)] <- 'below 50'
+wish_cate$sold_ct_cate[which(wish_cate$sold_ct >= 20000)] <- 'above 20K'
+wish_cate <- select(wish_cate, -sold_ct)
+wish_cate$sold_ct_cate <- as.factor(wish_cate$sold_ct_cate)
+wish_cate$color <- as.factor(wish_cate$color)
+wish_cate$size <- as.factor(wish_cate$size)
+wish_cate$origin <- as.factor(wish_cate$origin)
 table(wish_cate$sold_ct_cate) # much better
 
 
-x1  = factor(wish_cate$sold_ct_cate, levels=  c("below 50","100","1000","5000","10000","above 20K"))
-tb = table(x1)
-par(mfrow=c(1,2))
-hist(log(wish$sold_ct),col="grey", main="log(sold_ct) as numerical")
-barplot(tb, names.arg = row.names(tb), cex.names = 0.8,main = "sold_ct as categorical",las=2)
+x1 <- factor(wish_cate$sold_ct_cate, levels = c("below 50", "100", "1000", "5000", "10000", "above 20K"))
+tb <- table(x1)
+par(mfrow = c(1, 2))
+hist(log(wish$sold_ct), col = "grey", main = "log(sold_ct) as numerical", xlab = "log(sold_ct)")
+barplot(tb, names.arg = row.names(tb), cex.names = 0.8, main = "sold_ct as categorical", las = 2)
 
 
-wish.train = wish_cate[train_rows, ]
-wish.test = wish_cate[-train_rows, ]
+wish.train <- wish_cate[train_rows, ]
+wish.test <- wish_cate[-train_rows, ]
+```
 
+# Multinomial regression
+
+```{r}
+set.seed(123)
+library(nnet)
+multinomial.mod <- multinom(sold_ct_cate ~ ., data = wish.train) 
+summary(multinomial.mod)
+multinomial.pred_train <- predict(multinomial.mod, wish.train) 
+multinomial.pred_test <- predict(multinomial.mod, wish.test)
+# training error
+print("Misclassification rate on the training set:")
+mean(as.character(multinomial.pred_train) != as.character(wish.train$sold_ct_cate))
+# test error
+print("Misclassification rate on the test set:")
+mean(as.character(multinomial.pred_test) != as.character(wish.test$sold_ct_cate))
+```
+
+```{r}
 library(e1071)
 
 set.seed(120)
 
-tuned = tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "linear", ranges =list(cost = append(seq(0.01,10,by=0.5),10)))
-summary(tuned) #cost = 1.51 is the best
+tuned <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "linear", ranges = list(cost = append(seq(0.01, 10, by = 0.5), 10)))
+summary(tuned) # cost = 1.51 is the best
 ```
 
 ```{r}
-lin.svm = svm(sold_ct_cate ~ ., kernel = "linear",type="C-class", data = wish.train, cost = 1.51)
+lin.svm <- svm(sold_ct_cate ~ ., kernel = "linear", type = "C-class", data = wish.train, cost = 1.51)
 
-train_pred = predict(lin.svm, wish.train)
-table =table(wish.train$sold_ct_cate, train_pred)
+train_pred <- predict(lin.svm, wish.train)
+table <- table(wish.train$sold_ct_cate, train_pred)
 
 print("training error with cost = 1.51: ")
-(table[2]+table[3]) /(sum(table[1:4]))
+(table[2] + table[3]) / (sum(table[1:4]))
 
-test_pred = predict(lin.svm, wish.test)
-table =table(wish.test$sold_ct_cate, test_pred)
+test_pred <- predict(lin.svm, wish.test)
+table <- table(wish.test$sold_ct_cate, test_pred)
 
 print("training error with cost = 1.51: ")
-(table[2]+table[3]) /(sum(table[1:4]))
+(table[2] + table[3]) / (sum(table[1:4]))
 
-#we cannot plot SVM classification plot since we have more than 2 columns
-table(wish.test$sold_ct_cate,test_pred)
+# we cannot plot SVM classification plot since we have more than 2 columns
+table(wish.test$sold_ct_cate, test_pred)
 ```
 
 ```{r}
-set.seed(143)
+set.seed(123)
 
-tuned = tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "radial", ranges =list(cost = append(seq(0.01,10,by=0.5),10)))
-summary(tuned) #cost = 9.51 is best
+tuned <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "radial", ranges = list(cost = append(seq(0.01, 10, by = 0.5), 10)))
+summary(tuned) # cost = 9.51 is best
 
-table(wish.test$sold_ct_cate,test_pred)
+table(wish.test$sold_ct_cate, test_pred)
 
 ```
 
 ```{r}
-rad.svm = svm(sold_ct_cate ~ ., kernel = "radial", data = wish.train, cost = 9.51)
+rad.svm <- svm(sold_ct_cate ~ ., kernel = "radial", data = wish.train, cost = 9.51)
 
-train_pred = predict(rad.svm, wish.train)
-table =table(wish.train$sold_ct_cate, train_pred)
+train_pred <- predict(rad.svm, wish.train)
+table <- table(wish.train$sold_ct_cate, train_pred)
 
 print("radical svm - training error with cost = 9.51: ")
-(table[2]+table[3]) /(sum(table[1:4]))
+(table[2] + table[3]) / (sum(table[1:4]))
 
-test_pred = predict(rad.svm, wish.test)
-table =table(wish.test$sold_ct_cate, test_pred)
+test_pred <- predict(rad.svm, wish.test)
+table <- table(wish.test$sold_ct_cate, test_pred)
 
 print("radical svm - training error with cost = 9.51: ")
-(table[2]+table[3]) /(sum(table[1:4]))
+(table[2] + table[3]) / (sum(table[1:4]))
 
-table(wish.test$sold_ct_cate,test_pred)
+table(wish.test$sold_ct_cate, test_pred)
 
 ```
 
 ```{r}
-tune.poly = tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "poly", degree = 3, ranges =list(cost = append(seq(0.01,10,by=0.5),10)))
-summary(tuned) #cost = 9.51 is best
+tune.poly <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "poly", degree = 3, ranges = list(cost = append(seq(0.01, 10, by = 0.5), 10)))
+summary(tuned) # cost = 9.51 is best
 ```
 
 ```{r}
-poly.svm = svm(sold_ct_cate ~ ., kernel = "poly", data = wish.train, degree = 3, cost = 9.51)
+poly.svm <- svm(sold_ct_cate ~ ., kernel = "poly", data = wish.train, degree = 3, cost = 9.51)
 
-train_pred = predict(poly.svm, wish.train)
-table =table(wish.train$sold_ct_cate, train_pred)
-
-print("poly svm - training error with cost = 9.51: ")
-(table[2]+table[3]) /(sum(table[1:4]))
-
-test_pred = predict(poly.svm, wish.test)
-table =table(wish.test$sold_ct_cate, test_pred)
+train_pred <- predict(poly.svm, wish.train)
+table <- table(wish.train$sold_ct_cate, train_pred)
 
 print("poly svm - training error with cost = 9.51: ")
-(table[2]+table[3]) /(sum(table[1:4]))
+(table[2] + table[3]) / (sum(table[1:4]))
 
-table(wish.test$sold_ct_cate,test_pred)
+test_pred <- predict(poly.svm, wish.test)
+table <- table(wish.test$sold_ct_cate, test_pred)
+
+print("poly svm - training error with cost = 9.51: ")
+(table[2] + table[3]) / (sum(table[1:4]))
+
+table(wish.test$sold_ct_cate, test_pred)
        
 ```
 
