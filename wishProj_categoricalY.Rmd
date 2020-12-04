@@ -152,6 +152,89 @@ wish.train <- wish_cate[train_rows, ] # wish training set
 wish.test <- wish_cate[-train_rows, ]
 ```
 
+### Tree Models
+
+```{r}
+library(tree)
+
+set.seed(123)
+
+tree.wish <- tree(sold_ct_cate ~ ., data = wish.train) 
+summary(tree.wish)
+tree.pred <- predict(tree.wish, wish.test, type = "class")
+
+table(tree.pred, wish.test$sold_ct_cate)
+
+print("Misclassification error rate on test set: ")
+
+1 - ((table(tree.pred, wish.test$sold_ct_cate)[1] + table(tree.pred, wish.test$sold_ct_cate)[8] + table(tree.pred, wish.test$sold_ct_cate)[15] + table(tree.pred, wish.test$sold_ct_cate)[22] + table(tree.pred, wish.test$sold_ct_cate)[29] + table(tree.pred, wish.test$sold_ct_cate)[36]) / nrow(wish.test))
+```
+
+### Bagging
+
+```{r}
+library(randomForest)
+set.seed(123)
+
+bag.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = 25, importance = TRUE)
+bag.wish
+
+bag.pred <- predict(bag.wish, wish.test)
+
+table(bag.pred, wish.test$sold_ct_cate)
+
+print("Misclassification error rate on test set: ")
+
+1 - ((table(bag.pred, wish.test$sold_ct_cate)[1] + table(bag.pred, wish.test$sold_ct_cate)[8] + table(bag.pred, wish.test$sold_ct_cate)[15] + table(bag.pred, wish.test$sold_ct_cate)[22] + table(bag.pred, wish.test$sold_ct_cate)[29] + table(bag.pred, wish.test$sold_ct_cate)[36]) / nrow(wish.test))
+```
+
+### Random forest
+
+```{r}
+set.seed(123)
+
+rf.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = 25 / 3, importance = TRUE)
+rf.wish
+
+rf.pred <- predict(rf.wish, wish.test)
+
+table(rf.pred, wish.test$sold_ct_cate)
+
+print("Misclassification error rate on test set: ")
+
+1 - ((table(rf.pred, wish.test$sold_ct_cate)[1] + table(rf.pred, wish.test$sold_ct_cate)[8] + table(rf.pred, wish.test$sold_ct_cate)[15] + table(rf.pred, wish.test$sold_ct_cate)[22] + table(rf.pred, wish.test$sold_ct_cate)[29] + table(rf.pred, wish.test$sold_ct_cate)[36]) / nrow(wish.test))
+```
+
+### GBM
+
+```{r}
+set.seed(123)
+
+library(h2o)
+h2o.init()
+
+wish.train.h2o <- as.h2o(wish.train)
+wish.test.h2o <- as.h2o(wish.test)
+predictors <- c(colnames(wish.train)[1:length(wish.train) - 1])
+response <- "sold_ct_cate"
+
+# Build and train the model:
+gbm.wish <- h2o.gbm(x = predictors,
+                    y = response,
+                    nfolds = 5,
+                    distribution = "multinomial",
+                    keep_cross_validation_predictions = TRUE,
+                    training_frame = wish.train.h2o)
+
+h2o.confusionMatrix(gbm.wish)
+print("Misclassification error rate on training set: ")
+h2o.confusionMatrix(gbm.wish)['Totals','Error']
+
+h2o.confusionMatrix(gbm.wish, wish.test.h2o)
+print("Misclassification error rate on test set: ")
+h2o.confusionMatrix(gbm.wish)['Totals','Error']
+```
+
 ### Multinomial regression
 
 ```{r}
@@ -169,10 +252,13 @@ print("Misclassification rate on the test set:")
 mean(as.character(multinomial.pred_test) != as.character(wish.test$sold_ct_cate))
 ```
 
+
+### SVM
+
 ```{r}
 library(e1071)
 
-set.seed(120)
+set.seed(123)
 
 tuned <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "linear", ranges = list(cost = append(seq(0.01, 10, by = 0.5), 10)))
 summary(tuned) # cost = 3.51 is the best
@@ -188,7 +274,7 @@ print("training error with cost = 3.51: ")
 test_pred <- predict(lin.svm, wish.test)
 table <- table(wish.test$sold_ct_cate, test_pred)
 
-print("training error with cost = 3.51: ")
+print("test error with cost = 3.51: ")
 (sum(table)-sum(diag(table))) / (sum(table))
 
 # we cannot plot SVM classification plot since we have more than 2 columns
@@ -214,7 +300,7 @@ print("radical svm - training error with cost = 10: ")
 test_pred <- predict(rad.svm, wish.test)
 table <- table(wish.test$sold_ct_cate, test_pred)
 
-print("radical svm - training error with cost = 10: ")
+print("radical svm - test error with cost = 10: ")
 (sum(table)-sum(diag(table))) / (sum(table))
 
 table(wish.test$sold_ct_cate, test_pred)
@@ -238,7 +324,7 @@ print("poly svm - training error with cost = 10: ")
 test_pred <- predict(poly.svm, wish.test)
 table <- table(wish.test$sold_ct_cate, test_pred)
 
-print("poly svm - training error with cost = 10: ")
+print("poly svm - test error with cost = 10: ")
 (sum(table)-sum(diag(table))) / (sum(table))
 
 table(wish.test$sold_ct_cate, test_pred)
