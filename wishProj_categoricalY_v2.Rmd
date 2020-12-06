@@ -1,0 +1,745 @@
+---
+title: "954:534 Wish Project"
+author: "Kanya Kreprasertkul, Yelin Shin and Zhe Ren"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, message = FALSE}
+options(warn = -1)
+library(dplyr)
+library(tidyr)
+#library(tidyverse)
+library(GGally)
+library(plotly)
+library(cowplot)
+library(ggcorrplot)
+library(stringr)
+```
+
+### Data pre-processing
+```{r, results='hide', echo=TRUE}
+wish <- read.csv('summer-products-with-rating-and-performance_2020-08.csv')
+
+#dropping unnecessary columns 
+drops <- c('title', 'tags', 'crawl_month', 'theme', 'product_id', 'product_picture', 'product_url', 'merchant_id', 'merchant_profile_picture', 'merchant_info_subtitle', 'merchant_name', 'merchant_title', 'urgency_text', 'title_orig', 'shipping_option_name', 'currency_buyer')
+wish <- wish[, !(names(wish) %in% drops)]
+
+#convert NA to 0
+wish$has_urgency_banner <- as.integer(wish$has_urgency_banner)
+wish$has_urgency_banner[which(is.na(wish$has_urgency_banner))] <- 0
+wish$rating_five_count[which(is.na(wish$rating_five_count))] <- 0
+wish$rating_four_count[which(is.na(wish$rating_four_count))] <- 0
+wish$rating_three_count[which(is.na(wish$rating_three_count))] <- 0
+wish$rating_two_count[which(is.na(wish$rating_two_count))] <- 0
+wish$rating_one_count[which(is.na(wish$rating_one_count))] <- 0
+wish$rating[which(wish$rating_count == 0)] <- 0
+
+# cleaning size and color option
+wish <- wish %>%
+  mutate(product_variation_size_id = tolower(product_variation_size_id)) %>%
+  mutate(product_variation_size_id = gsub(pattern = '.', replacement = '',
+                                          x = product_variation_size_id, fixed = TRUE)) %>%
+  mutate(product_variation_size_id = gsub(pattern = '(size-*)|(size)', replacement = '',
+                                          x = product_variation_size_id)) %>%
+  mutate(product_variation_size_id = gsub(pattern = '.+[-]', replacement = '',
+                                          x = product_variation_size_id)) %>%
+  mutate(product_variation_size_id = ifelse(grepl(pattern = 'xl',product_variation_size_id),
+                                            'xl', product_variation_size_id)) %>%
+  mutate(product_variation_size_id = ifelse(grepl(pattern = 'xs', product_variation_size_id),
+                                            'xs', product_variation_size_id)) %>%
+  mutate(product_variation_size_id = str_replace(product_variation_size_id, ' ', '')) %>%
+  mutate(product_variation_size_id = ifelse(product_variation_size_id %in% c('s', 'xs', 'm', 'l', 'xl'),product_variation_size_id, 'One-sized'))
+wish <- wish %>% 
+    mutate(product_color = tolower(product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'red|burgundy|claret|wine|jasper', product_color),
+                                  'red', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'blue|navy', product_color),
+                                  'blue', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'white', product_color),
+                                  'white', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'green|army', product_color),
+                                  'green', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'black', product_color),
+                                  'black', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'yellow|leopard|gold', product_color),
+                                  'yellow', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'pink|rose', product_color),
+                                  'pink', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'grey|gray|silver', product_color),
+                                  'gray', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'purple|violet', product_color),
+                                  'purple', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'orange|apricot', product_color),
+                                  'orange', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'beige|nude|ivory|coffee|brown|khaki|camel',
+                                        product_color), 'khaki', product_color)) %>%
+    mutate(product_color = ifelse(grepl(pattern = 'floral|multicolor|camouflage|rainbow|star',
+                                        product_color), 'multicolor', product_color))
+
+#name blank category 
+wish['product_color'][wish['product_color'] == ''] <- 'Not defined'
+wish['origin_country'][wish['origin_country'] == ''] <- 'Not defined'
+
+#shipping_is_express has too many zero, so we decided to exclude this column
+wish <- select(wish, -c(shipping_is_express))
+
+#Only 7 colors have more than 100 records so We decided to keep only 8 factors of color, i.e. black, white, blue, red, green, yellow, pink and others.
+color_list <- c('black', 'white', 'blue', 'red', 'green', 'yellow', 'pink')
+wish$product_color[!(wish$product_color %in% color_list)] <- 'others'
+
+wish %>% 
+  group_by(product_color) %>%
+  summarise(no_rows = length(product_color)) %>%
+  arrange(desc(no_rows)) %>%
+  filter(no_rows > 100)
+
+#We decided to change origin to CN and others.
+wish$origin_country <- as.character(wish$origin_country)
+wish$origin_country[which(wish$origin_country != 'CN')] <- 'others'
+wish$origin_country[is.na(wish$origin_country)] <- 'others'
+
+wish %>% 
+  group_by(origin_country) %>%
+  summarise(no_rows = length(origin_country)) %>%
+  arrange(desc(no_rows)) 
+
+#convert column name to short version
+origin_colname <- colnames(wish)
+colnames(wish) <- c('price', 'retail', 'sold_ct', 'ad_boost', 'rate', 'rate_ct', 'rate5', 'rate4', 'rate3', 'rate2', 'rate1', 'badge_ct', 'bg_local', 'bg_quality', 'bg_fastship', 'color', 'size', 'inventory', 'ship_price', 'able_country', 'total_invent', 'has_bg_urgency', 'origin', 'seller_rate_ct', 'seller_rate', 'has_seller_propic')
+
+```
+
+```{r}
+library(corrplot)
+# finding correlation between numeric columns and charges
+
+numeric.column <- sapply(wish, is.numeric)
+corr <- cor(wish[, numeric.column]) #, use = 'pairwise.complete.obs'
+corrplot(corr, method = 'color')
+
+```
+
+```{r}
+#convert the y (sold_ct) to categorical. Also since it is unbalanced we group some category together.
+table(wish['sold_ct']) # very unbalaned
+wish_cate <- wish
+wish_cate$sold_ct_cate <- wish_cate$sold_ct
+wish_cate$sold_ct_cate[which(wish_cate$sold_ct <= 100)] <- 'below 100'
+wish_cate$sold_ct_cate[which(wish_cate$sold_ct >= 5000)] <- 'above 5K'
+wish_cate$sold_ct_cate[which(wish_cate$sold_ct > 100 & wish_cate$sold_ct < 5000)] <- 'between 100 and 5k'
+wish_cate <- select(wish_cate, -sold_ct)
+wish_cate$sold_ct_cate <- as.factor(wish_cate$sold_ct_cate)
+wish_cate$color <- as.factor(wish_cate$color)
+wish_cate$size <- as.factor(wish_cate$size)
+wish_cate$origin <- as.factor(wish_cate$origin)
+table(wish_cate$sold_ct_cate) # much better
+
+x1 <- factor(wish_cate$sold_ct_cate)
+tb <- table(x1)
+barplot(tb, names.arg = row.names(tb), cex.names = 0.8, main = "sold_ct as categorical", las = 2)
+
+
+wish_cate$rate5_pct <- wish_cate$rate5/wish_cate$rate_ct
+wish_cate$rate4_pct <- wish_cate$rate4/wish_cate$rate_ct
+wish_cate$rate3_pct <- wish_cate$rate3/wish_cate$rate_ct
+wish_cate$rate2_pct <- wish_cate$rate2/wish_cate$rate_ct
+wish_cate$rate1_pct <- wish_cate$rate1/wish_cate$rate_ct
+
+drops <- c('rate_ct', 'rate5', 'rate4', 'rate3', 'rate2', 'rate1')
+wish_cate <- wish_cate[, !(names(wish_cate) %in% drops)]
+
+wish_cate <- wish_cate %>% drop_na(rate5_pct) 
+wish_cate <- wish_cate %>% drop_na(price) 
+
+summary(wish_cate)
+
+str(wish_cate)
+
+```
+
+
+#### 80:20 split for train and test set
+```{r}
+
+set.seed(123)
+
+train_rows <- sample(1:nrow(wish), 0.8 * nrow(wish))
+wish.train <- wish_cate[train_rows, ] # wish training set
+wish.test <- wish_cate[-train_rows, ]
+
+wish.train <- wish.train %>% drop_na(price)
+
+```
+
+### Tree Models
+
+```{r}
+library(tree)
+
+set.seed(123)
+
+tree.wish <- tree(sold_ct_cate ~ ., data = wish.train) 
+summary(tree.wish)
+tree.pred <- predict(tree.wish, wish.test, type = "class")
+
+# table(tree.pred, wish.test$sold_ct_cate)
+
+# print("Misclassification error rate on test set: ")
+
+confusion.matrix <- table(wish.test$sold_ct_cate, tree.pred)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+above5k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
+print(paste("Test accuracy:",accuracy.percent,"%"))
+print(paste("Above 5k accuracy:",above5k.precent,"%"))
+
+
+
+```
+
+### Bagging
+
+```{r}
+library(randomForest)
+set.seed(123)
+
+bag.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = 25, importance = TRUE, na.action=na.roughfix)
+bag.wish
+
+bag.pred <- predict(bag.wish, wish.test)
+
+confusion.matrix <- table(wish.test$sold_ct_cate, bag.pred)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+above5k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
+print(paste("Test accuracy:",accuracy.percent,"%"))
+print(paste("Above 5k accuracy:",above5k.precent,"%"))
+
+```
+
+### Random forest
+
+```{r}
+set.seed(123)
+
+rf.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = 25 / 3, importance = TRUE, na.action=na.roughfix)
+rf.wish
+
+rf.pred <- predict(rf.wish, wish.test)
+
+
+confusion.matrix <- table(wish.test$sold_ct_cate, rf.pred)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+above5k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
+print(paste("Test accuracy:",accuracy.percent,"%"))
+print(paste("Above 5k accuracy:",above5k.precent,"%"))
+
+```
+
+### GBM
+
+```{r}
+set.seed(123)
+
+library(h2o)
+h2o.init()
+
+wish.train.h2o <- as.h2o(wish.train)
+wish.test.h2o <- as.h2o(wish.test)
+predictors <- c(colnames(wish.train)[1:length(wish.train) - 1])
+response <- "sold_ct_cate"
+
+# Build and train the model:
+gbm.wish <- h2o.gbm(x = predictors,
+                    y = response,
+                    nfolds = 5,
+                    distribution = "multinomial",
+                    keep_cross_validation_predictions = TRUE,
+                    training_frame = wish.train.h2o)
+
+h2o.confusionMatrix(gbm.wish)
+print("Misclassification error rate on training set: ")
+h2o.confusionMatrix(gbm.wish)['Totals','Error']
+
+h2o.confusionMatrix(gbm.wish, wish.test.h2o)
+print("Misclassification error rate on test set: ")
+h2o.confusionMatrix(gbm.wish,wish.test.h2o)['Totals','Error']
+```
+
+### Multinomial regression
+
+```{r}
+set.seed(123)
+library(nnet)
+multinomial.mod <- multinom(sold_ct_cate ~ ., data = wish.train, na.action=na.roughfix) 
+summary(multinomial.mod)
+multinomial.pred_train <- predict(multinomial.mod, wish.train) 
+multinomial.pred_test <- predict(multinomial.mod, wish.test)
+# training error
+print("Misclassification rate on the training set:")
+mean(as.character(multinomial.pred_train) != as.character(wish.train$sold_ct_cate))
+# test error
+print("Misclassification rate on the test set:")
+mean(as.character(multinomial.pred_test) != as.character(wish.test$sold_ct_cate))
+```
+
+
+### SVM
+
+```{r}
+library(e1071)
+# summary(wish.train)
+# summary(wish.test)
+
+set.seed(123)
+
+tuned <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "linear", ranges = list(cost = append(seq(0.01, 10, by = 0.5), 10)))
+summary(tuned) # cost = 5.51 is the best
+
+lin.svm <- svm(sold_ct_cate ~ ., kernel = "linear", type = "C-class", data = wish.train, cost = 5.01)
+
+train_pred <- predict(lin.svm, wish.train, na.action = na.exclude)
+table <- table(wish.train$sold_ct_cate, train_pred)
+
+print("accuracy with cost = 5.01 for train: ")
+1-(sum(table)-sum(diag(table))) / (sum(table))
+
+test_pred <- predict(lin.svm, wish.test)
+table <- table(wish.test$sold_ct_cate, test_pred)
+
+print("accuracy with cost = 5.01 for test: ")
+1-(sum(table)-sum(diag(table))) / (sum(table))
+print("above 5k group - accuracy with cost = 9.51: ")
+sum(table[1,1]) /sum(table[1,])
+
+# we cannot plot SVM classification plot since we have more than 2 columns
+table(wish.test$sold_ct_cate, test_pred)
+```
+
+```{r}
+# names(wish.train)
+set.seed(123)
+
+tuned <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "radial", ranges = list(cost = append(seq(0.01, 15, by = 0.5), 10)))
+summary(tuned) # cost = 13.01 is best
+
+table(wish.test$sold_ct_cate, test_pred)
+
+rad.svm <- svm(sold_ct_cate ~ ., kernel = "radial", data = wish.train, cost = 13.01)
+
+train_pred <- predict(rad.svm, wish.train, na.action = na.exclude)
+table <- table(wish.train$sold_ct_cate, train_pred)
+
+print("accuracy with cost = 13.01 for train: ")
+1-(sum(table)-sum(diag(table))) / (sum(table))
+
+test_pred <- predict(lin.svm, wish.test)
+table <- table(wish.test$sold_ct_cate, test_pred)
+
+print("accuracy with cost = 13.01 for test: ")
+1-(sum(table)-sum(diag(table))) / (sum(table))
+print("above 5k group - accuracy with cost = 13.01: ")
+sum(table[1,1]) /sum(table[1,])
+
+table(wish.test$sold_ct_cate, test_pred)
+
+```
+
+The result shows that it result overfitting. (traing error is getting low, but test error is getting higher)
+
+```{r}
+set.seed(123)
+tune.poly <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "poly", degree = 3, ranges = list(cost = append(seq(0.01, 15, by = 0.5), 10)))
+summary(tuned) # cost = 13.01 is best
+
+poly.svm <- svm(sold_ct_cate ~ ., kernel = "poly", data = wish.train, degree = 3, cost = 13.01)
+
+train_pred <- predict(poly.svm, wish.train, na.action = na.exclude)
+table <- table(wish.train$sold_ct_cate, train_pred)
+
+print("accuracy with cost = 13.01 for train: ")
+1-(sum(table)-sum(diag(table))) / (sum(table))
+
+test_pred <- predict(lin.svm, wish.test)
+table <- table(wish.test$sold_ct_cate, test_pred)
+
+print("accuracy with cost = 13.01 for test: ")
+1-(sum(table)-sum(diag(table))) / (sum(table))
+print("above 5k group - accuracy with cost = 13.01: ")
+sum(table[1,1]) /sum(table[1,])
+
+table(wish.test$sold_ct_cate, test_pred)
+```
+
+
+### XGBoost
+```{r, message = FALSE}
+library(xgboost)
+# Create numeric labels with one-hot encoding
+set.seed(123)
+train_labs <- as.numeric(wish.train$sold_ct_cate) - 1 
+val_labs <- as.numeric(wish.test$sold_ct_cate) - 1 
+
+# options(na.action='na.pass')
+new_train <- model.matrix(~ . + 0, data = subset(wish.train, select = -sold_ct_cate))
+new_val <- model.matrix(~ . + 0, data = subset(wish.test, select = -sold_ct_cate))
+
+# Prepare matrices
+xgb_train <- xgb.DMatrix(data = new_train, label = train_labs)
+xgb_val <- xgb.DMatrix(data = new_val, label = val_labs)
+
+params <- list(booster = "gbtree", objective = "multi:softprob", num_class = 4, eval_metric = "mlogloss")
+
+# Calculate # of folds for cross-validation
+xgbcv <- xgb.cv(params = params, data = xgb_train, nrounds = 100, nfold = 5, showsd = TRUE, stratified = TRUE, print_every_n = 10, early_stop_round = 20, maximize = FALSE, prediction = TRUE) 
+
+```
+
+```{r}
+# Function to compute classification error
+classification_error <- function(conf_mat) {
+  conf_mat = as.matrix(conf_mat)
+  
+  error = 1 - sum(diag(conf_mat)) / sum(conf_mat)
+  
+  return (error)
+}
+
+# Mutate xgb output to deliver hard predictions
+xgb_train_preds <- data.frame(xgbcv$pred) %>% mutate(max = max.col(., ties.method = "last"), label = train_labs + 1)
+
+# Examine output
+head(xgb_train_preds)
+
+xgb_conf_mat <- table(true = train_labs + 1, pred = xgb_train_preds$max)
+
+# Error 
+cat("XGB Training Classification Error Rate:", classification_error(xgb_conf_mat), "\n")
+
+# predicting / testing on test dataset
+xgb_model <- xgb.train(params = params, data = xgb_train, nrounds = 100)
+
+# Predict for validation set
+xgb_val_preds <- predict(xgb_model, newdata = xgb_val)
+
+xgb_val_out <- matrix(xgb_val_preds, nrow = 4, ncol = length(xgb_val_preds) / 4) %>% 
+               t() %>%
+               data.frame() %>%
+               mutate(max = max.col(., ties.method = "last"), label = val_labs + 1) 
+
+# Confustion Matrix
+xgb_val_conf <- table(true = val_labs + 1, pred = xgb_val_out$max)
+
+cat("XGB Validation Classification Error Rate:", 1-classification_error(xgb_val_conf), "\n")
+cat("XGB Validation Classification Error Rate - above 5k:", xgb_val_conf[1,1]/sum(xgb_val_conf[1,]), "\n")
+
+```
+
+
+##Boosting 
+```{r}
+
+boost.wish = gbm(sold_ct_cate~., data = wish.train, distribution = "gaussian", n.trees = 10000, shrinkage = 0.01, interaction.depth = 4)
+summary(boost.wish)
+
+```
+
+
+
+```{r}
+plot(boost.wish,i="seller_rate_ct")
+plot(boost.wish,i="color")
+
+
+```
+
+
+### Appendix
+
+## Random Forest with class weight (oversampliing)
+```{r}
+# adapt on random forest 
+# https://www.rdocumentation.org/packages/iRF/versions/2.0.0/topics/randomForest 
+set.seed(123)
+
+bag.wish_over <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = 25, importance = TRUE, classwt = c(0.2,0.2,0.2,0.2,0.2,0.2))
+bag.wish_over
+
+bag.pred_over <- predict(bag.wish_over, wish.test)
+
+table(bag.pred_over, wish.test$sold_ct_cate)
+
+print("Misclassification error rate on test set: ")
+
+1 - ((table(bag.pred_over, wish.test$sold_ct_cate)[1] + table(bag.pred_over, wish.test$sold_ct_cate)[8] + table(bag.pred_over, wish.test$sold_ct_cate)[15] + table(bag.pred_over, wish.test$sold_ct_cate)[22] + table(bag.pred_over, wish.test$sold_ct_cate)[29] + table(bag.pred_over, wish.test$sold_ct_cate)[36]) / nrow(wish.test))
+```
+
+
+
+```{r}
+library(rfUtilities)
+# https://www.rdocumentation.org/packages/rfUtilities/versions/2.1-5/topics/rf.crossValidation 
+rf.cv <- rf.crossValidation(bag.wish_over,  wish.train, p=0.10, n=99, ntree=501) 
+
+ # Plot cross validation versus model producers accuracy
+par(mfrow=c(1,2)) 
+ plot(rf.cv, type = "cv", main = "CV producers accuracy")
+ plot(rf.cv, type = "model", main = "Model producers accuracy")
+
+ # Plot cross validation versus model oob
+par(mfrow=c(1,2)) 
+ plot(rf.cv, type = "cv", stat = "oob", main = "CV oob error")
+ plot(rf.cv, type = "model", stat = "oob", main = "Model oob error")
+
+```
+
+
+
+## cross validation 
+```{r}
+# https://www.geeksforgeeks.org/cross-validation-in-r-programming/ 
+library(caret) 
+set.seed(125)  
+  
+
+# value of K equal to 10 
+train_control <- trainControl(method = "cv", 
+                              number = 10) 
+  
+bag.wish_over <- train(sold_ct_cate ~., data = wish.train,  
+               method = "rf", 
+               trControl = train_control) 
+  
+# printing model performance metrics 
+# along with other details 
+print(bag.wish_over)
+
+```
+
+
+
+#cv 
+```{r}
+cv.wish.tree = cv.tree(tree.wish, FUN = prune.misclass)
+cv.wish.tree
+plot(cv.wish.tree)
+# from the plot we can see the misclassification rate doesn't go down after n=3
+
+```
+
+
+```{r}
+
+prune.tree = prune.misclass(tree.wish, best = 3)
+plot(prune.tree)
+text(prune.tree, pretty=0)
+
+```
+
+
+
+```{r}
+
+tree.pred = predict(prune.tree, wish.test, type="class")
+
+confusion.matrix <- table(wish.test$sold_ct_3, tree.pred)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+print(paste("accuracy:",accuracy.percent,"%"))
+# the result is satisfying- pruning doesn't hurt the prediction 
+```
+
+
+## Random Forest
+```{r}
+# wish.train$sold_ct_3
+# wish.train$sold_ct_3[which(is.na(wish.train$sold_ct_3))]
+```
+
+```{r}
+# rf.wish = randomForest(sold_ct_3~., data = wish.train)
+# https://stackoverflow.com/questions/38250440/error-in-na-fail-default-missing-values-in-object-but-no-missing-values
+# https://www.kaggle.com/nsecord/gbm-parameter-estimation
+rf.wish <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 25, importance = TRUE,na.action=na.roughfix)
+rf.wish
+```
+
+
+
+```{r}
+
+# https://www.geeksforgeeks.org/cross-validation-in-r-programming/ 
+library(caret) 
+set.seed(125)  
+  
+
+# value of K equal to 10 
+train_control <- trainControl(method = "cv", 
+                              number = 10) 
+  
+rf.wish.cv <- train(sold_ct_3 ~., data = wish.train,  
+               method = "rf", ,na.action=na.roughfix,
+               trControl = train_control) 
+  
+# printing model performance metrics 
+# along with other details 
+print(rf.wish.cv)
+
+```
+
+over sampling 
+```{r}
+set.seed(123)
+
+rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 24, importance = TRUE, classwt = c(0.33,0.33,0.33), na.action=na.roughfix)
+rf.wish.over
+
+rf.pred.over <- predict(rf.wish.over, wish.test)
+
+# table(rf.pred.over, wish.test$sold_ct_3)
+
+confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+print(paste("accuracy:",accuracy.percent,"%"))
+
+```
+
+
+To tune the model, we try different `mtry`. now mtry = 24 <br>
+it reaches the highest accuracy when mtry = 3 or 6, within the smallest mtry range, 
+```{r}
+
+accuracy = double(24)
+for(mtry in 1:24){
+  fit = randomForest(sold_ct_3~., data = wish.train, mtry=mtry,na.action=na.roughfix)
+  pred = predict(fit, wish.test)
+  confusion.matrix <- table(wish.test$sold_ct_3, pred)
+  accuracy[mtry] = 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+}
+
+accuracy
+matplot(1:mtry, accuracy, pch = 23, col= "blue", type = "b", ylab="Prediction Accuracy")
+legend("topright", legend =  "Test", pch = 23, col = "blue")
+
+# it reaches the highest accuracy when mtry = 4 or 5, within the smallest mtry range 
+
+```
+
+then we go with mtry = 5<br>
+when oversampled, the test accuracy is 77.05%. 
+```{r}
+set.seed(123)
+
+rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 5, importance = TRUE, classwt = c(0.33,0.33,0.33), na.action=na.roughfix)
+rf.wish.over
+
+rf.pred.over <- predict(rf.wish.over, wish.test)
+
+# table(rf.pred.over, wish.test$sold_ct_3)
+
+confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+print(paste("accuracy:",accuracy.percent,"%"))
+
+```
+
+
+```{r}
+set.seed(123)
+
+rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 5, importance = TRUE, classwt = c(0.1,0.9,0.9), na.action=na.roughfix)
+rf.wish.over
+
+rf.pred.over <- predict(rf.wish.over, wish.test)
+
+# table(rf.pred.over, wish.test$sold_ct_3)
+
+confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
+print(confusion.matrix)
+print(confusion.matrix[1,1])
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+above10k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
+print(paste("Test accuracy:",accuracy.percent,"%"))
+print(paste("Above 10k accuracy:",above10k.precent,"%"))
+
+```
+
+When not oversampled, the test accuracy is 78.36%, even slightly higher than the oversampled data.  
+```{r}
+set.seed(123)
+
+rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 5, importance = TRUE, na.action=na.roughfix)
+rf.wish.over
+
+rf.pred.over <- predict(rf.wish.over, wish.test)
+
+# table(rf.pred.over, wish.test$sold_ct_3)
+
+confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+above10k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
+print(paste("Test accuracy:",accuracy.percent,"%"))
+print(paste("Above 10k accuracy:",above10k.precent,"%"))
+```
+
+
+
+
+
+```{r}
+
+
+```
+
+
+
+```{r}
+
+
+
+```
+
+
+
+
+```{r}
+
+
+
+```
+
+
+```{r}
+
+
+
+```
+
+
+
+```{r}
+
+
+
+```
+
+
+
+```{r}
+
+```
+
