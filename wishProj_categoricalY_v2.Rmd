@@ -261,7 +261,7 @@ gbm.wish <- h2o.gbm(x = predictors,
                     nfolds = 5,
                     distribution = "multinomial",
                     keep_cross_validation_predictions = TRUE,
-                    training_frame = wish.train.h2o)
+                    training_frame = wish.train.h2o, seed=1)
 
 h2o.confusionMatrix(gbm.wish)
 print("Misclassification error rate on training set: ")
@@ -378,7 +378,7 @@ table(wish.test$sold_ct_cate, test_pred)
 ```
 
 
-### XGBoost
+## XGBoost
 ```{r, message = FALSE}
 library(xgboost)
 # Create numeric labels with one-hot encoding
@@ -441,6 +441,20 @@ cat("XGB Validation Classification Error Rate - above 5k:", xgb_val_conf[1,1]/su
 
 ```
 
+#Parameter Tuning
+```{r}
+# https://www.hackerearth.com/practice/machine-learning/machine-learning-algorithms/beginners-tutorial-on-xgboost-parameter-tuning-r/tutorial/
+
+```
+
+
+```{r}
+
+
+
+```
+
+
 
 ##Boosting 
 ```{r}
@@ -461,6 +475,101 @@ plot(boost.wish,i="color")
 
 
 ### Appendix
+
+
+
+## Stacked Ensembles 
+```{r}
+# we already have gbm.wish for GBM, now build RF model
+# https://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/stacked-ensembles.html
+# Stacked Ensemble model's performance is not so different from those of base learners' 
+set.seed(123)
+rf.wish <- h2o.randomForest(x = predictors,
+                          y = response,
+                          training_frame = wish.train.h2o,
+                          ntrees = 50,
+                          nfolds = 5,
+                          keep_cross_validation_predictions = TRUE,
+                          seed = 1)
+
+ensemble <- h2o.stackedEnsemble(x = predictors,
+                                y = response,
+                                training_frame = wish.train.h2o,
+                                base_models = list(gbm.wish, rf.wish))
+
+perf <- h2o.performance(ensemble, newdata = wish.test.h2o)
+
+# Compare to base learner performance on the test set
+perf_gbm_test <- h2o.performance(gbm.wish, newdata = wish.test.h2o)
+perf_rf_test <- h2o.performance(rf.wish, newdata = wish.test.h2o)
+baselearner_best_auc_test <- max(h2o.auc(perf_gbm_test), h2o.auc(perf_rf_test))
+ensemble_auc_test <- h2o.auc(perf)
+print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
+print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
+
+perf
+perf_gbm_test
+perf_rf_test
+
+# Generate predictions on a test set (not sure if neccessary)
+pred <- h2o.predict(ensemble, newdata = test)
+```
+
+# Reference
+```{r}
+# GBM Hyperparamters
+learn_rate_opt <- c(0.01, 0.03)
+max_depth_opt <- c(3, 4, 5, 6, 9)
+sample_rate_opt <- c(0.7, 0.8, 0.9, 1.0)
+col_sample_rate_opt <- c(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
+hyper_params <- list(learn_rate = learn_rate_opt,
+                     max_depth = max_depth_opt,
+                     sample_rate = sample_rate_opt,
+                     col_sample_rate = col_sample_rate_opt)
+
+search_criteria <- list(strategy = "RandomDiscrete",
+                        max_models = 3,
+                        seed = 1)
+
+gbm_grid <- h2o.grid(algorithm = "gbm",
+                     grid_id = "gbm_grid_binomial",
+                     x = predictors,
+                     y = response,
+                     training_frame = wish.train.h2o,
+                     ntrees = 10,
+                     seed = 1,
+                     nfolds = 5,
+                     keep_cross_validation_predictions = TRUE,
+                     hyper_params = hyper_params,
+                     search_criteria = search_criteria)
+```
+
+
+```{r}
+ensemble <- h2o.stackedEnsemble(x = predictors,
+                                y = response,
+                                training_frame = wish.train.h2o,
+                                base_models = gbm_grid@model_ids)
+perf <- h2o.performance(ensemble, newdata = wish.test.h2o)
+perf
+# Compare to base learner performance on the test set
+# .getauc <- function(mm) h2o.auc(h2o.performance(h2o.getModel(mm), newdata = wish.test.h2o))
+# baselearner_aucs <- sapply(gbm_grid@model_ids, .getauc)
+# baselearner_best_auc_test <- max(baselearner_aucs)
+# ensemble_auc_test <- h2o.auc(perf)
+# print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
+# print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
+
+
+# # Generate predictions on a test set (if neccessary)
+# pred <- h2o.predict(ensemble, newdata = wish.test.h2o)
+```
+
+
+
+
+
+
 
 ## Random Forest with class weight (oversampliing)
 ```{r}
