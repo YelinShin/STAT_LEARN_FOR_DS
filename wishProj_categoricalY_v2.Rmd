@@ -140,7 +140,7 @@ x1 <- factor(wish_cate$sold_ct_cate)
 tb <- table(x1)
 barplot(tb, names.arg = row.names(tb), cex.names = 0.8, main = "sold_ct as categorical", las = 2)
 
-
+#percentage of each rate count 
 wish_cate$rate5_pct <- wish_cate$rate5/wish_cate$rate_ct
 wish_cate$rate4_pct <- wish_cate$rate4/wish_cate$rate_ct
 wish_cate$rate3_pct <- wish_cate$rate3/wish_cate$rate_ct
@@ -441,6 +441,102 @@ cat("XGB Validation Classification Error Rate - above 5k:", xgb_val_conf[1,1]/su
 
 ```
 
+# Neural network
+```{r}
+library(neuralnet)
+library(nnet)
+y_index = grep("sold_ct_cate", names(wish.train))
+nn.train = cbind(wish.train[,-y_index], wish.train[,y_index])
+names(nn.train)[names(nn.train) == 'wish.train[, y_index]'] <- 'sold_ct_cate'
+
+
+nn.train = cbind(nn.train[, 1:8],class.ind(as.factor(nn.train$color)),nn.train[, 11:15],nn.train[17:24],class.ind(as.factor(nn.train$size)),class.ind(as.factor(nn.train$origin)), class.ind(as.factor(nn.train$sold_ct_cate)))
+#normalized by scaling data
+scl <- function(x){ (x - min(x))/(max(x) - min(x)) }
+nn.train[, 1:29] <- data.frame(lapply(nn.train[, 1:29], scl))
+
+names(nn.train)[names(nn.train) == 'One-sized'] <- 'one_sized'
+names(nn.train)[names(nn.train) == 'above 5K'] <- 'above_5k'
+names(nn.train)[names(nn.train) == 'below 100'] <- 'below_100'
+names(nn.train)[names(nn.train) == 'between 100 and 5k'] <- 'btw_100_5k'
+
+name <- names(nn.train)
+f <- as.formula(paste("above_5k + below_100 + btw_100_5k ~", paste(name[!name %in% c("above_5k","below_100","btw_100_5k")], collapse = " + ")))
+f
+```
+
+```{r}
+set.seed(123)
+nn <- neuralnet(f,
+                data = nn.train,
+                hidden = c(37, 15,3),
+                act.fct = "logistic",
+                linear.output = FALSE,stepmax = 3000)
+```
+
+```{r}
+plot(nn)
+
+```
+
+```{r}
+
+nn.test = cbind(wish.test[,-y_index], wish.test[,y_index])
+names(nn.test)[names(nn.test) == 'wish.test[, y_index]'] <- 'sold_ct_cate'
+
+
+nn.test = cbind(nn.test[, 1:8],class.ind(as.factor(nn.test$color)),nn.test[, 11:15],nn.test[17:24],class.ind(as.factor(nn.test$size)),class.ind(as.factor(nn.test$origin)), class.ind(as.factor(nn.test$sold_ct_cate)))
+#normalized by scaling data
+scl <- function(x){ (x - min(x))/(max(x) - min(x)) }
+nn.test[, 1:29] <- data.frame(lapply(nn.test[, 1:29], scl))
+
+names(nn.test)[names(nn.test) == 'One-sized'] <- 'one_sized'
+names(nn.test)[names(nn.test) == 'above 5K'] <- 'above_5k'
+names(nn.test)[names(nn.test) == 'below 100'] <- 'below_100'
+names(nn.test)[names(nn.test) == 'between 100 and 5k'] <- 'btw_100_5k'
+
+#train accuracy
+nn.train_pred <- compute(nn, nn.train[, 1:37])
+nn.train_pred <- nn.train_pred$net.result
+true_y.train <- max.col(nn.train[, 38:40])
+predicted_y.train <- max.col(nn.train_pred)
+
+#test accuracy
+nn.test_pred <- compute(nn, nn.test[, 1:37])
+nn.test_pred <- nn.test_pred$net.result
+true_y.test <- max.col(nn.test[, 38:40])
+predicted_y.test <- max.col(nn.test_pred)
+
+table.train <- table(true_y.train, predicted_y.train)
+table.test <- table(true_y.test, predicted_y.test)
+
+
+print("accuracy for train: ")
+print(1-(sum(table.train)-sum(diag(table.train))) / (sum(table.train)))
+print("accuracy for test: ")
+print(1-(sum(table.test)-sum(diag(table.test))) / (sum(table.test)))
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #Parameter Tuning
 ```{r}
 # https://www.hackerearth.com/practice/machine-learning/machine-learning-algorithms/beginners-tutorial-on-xgboost-parameter-tuning-r/tutorial/
@@ -448,11 +544,6 @@ cat("XGB Validation Classification Error Rate - above 5k:", xgb_val_conf[1,1]/su
 ```
 
 
-```{r}
-
-
-
-```
 
 
 
