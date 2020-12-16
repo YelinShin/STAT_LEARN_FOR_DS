@@ -2,6 +2,7 @@
 title: "954:534 Wish Project"
 author: "Kanya Kreprasertkul, Yelin Shin and Zhe Ren"
 output:
+  word_document: default
   html_document:
     df_print: paged
 ---
@@ -179,7 +180,7 @@ wish.train <- wish.train %>% drop_na(price)
 ```{r}
 set.seed(123)
 library(nnet)
-multinomial.mod <- multinom(sold_ct_cate ~ ., data = wish.train, na.action=na.roughfix) 
+multinomial.mod <- multinom(sold_ct_cate ~ ., data = wish.train) #, na.action = na.roughfix
 summary(multinomial.mod)
 multinomial.pred_train <- predict(multinomial.mod, wish.train) 
 multinomial.pred_test <- predict(multinomial.mod, wish.test)
@@ -229,7 +230,7 @@ print(paste("Above 5k accuracy:",above5k.precent,"%"))
 library(randomForest)
 set.seed(123)
 
-bag.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = length(wish.train) - 1, importance = TRUE, na.action=na.roughfix)
+bag.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = length(wish.train) - 1, importance = TRUE, na.action = na.roughfix)
 bag.wish
 
 bag.pred <- predict(bag.wish, wish.test)
@@ -249,7 +250,7 @@ print(paste("Above 5k accuracy:",above5k.precent,"%"))
 ```{r}
 set.seed(123)
 
-rf.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = (length(wish.train) - 1) / 3, importance = TRUE, na.action=na.roughfix)
+rf.wish <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = (length(wish.train) - 1) / 3, importance = TRUE, na.action = na.roughfix)
 rf.wish
 
 rf.pred <- predict(rf.wish, wish.test)
@@ -334,7 +335,7 @@ table(wish.test$sold_ct_cate, test_pred)
 
 ```
 
-The result shows that it result overfitting. (traing error is getting low, but test error is getting higher)
+The result shows that there is overfitting issue. (traing error is getting low, but test error is getting higher)
 
 #### Polynomial
 
@@ -369,7 +370,7 @@ table(wish.test$sold_ct_cate, test_pred)
 
 ```{r}
 library(gbm)
-boost.wish = gbm(sold_ct_cate~., data = wish.train, distribution = "multinomial", n.trees = 10000, shrinkage = 0.01, interaction.depth = 4)
+boost.wish = gbm(sold_ct_cate ~ ., data = wish.train, distribution = "multinomial", n.trees = 10000, shrinkage = 0.01, interaction.depth = 4)
 summary(boost.wish)
 
 boost.predP <- predict(boost.wish, wish.test, n.trees = 10000, type = 'response')
@@ -511,7 +512,7 @@ pred <- h2o.predict(ensemble, newdata = wish.test.h2o)
 library(neuralnet)
 library(nnet)
 y_index = grep("sold_ct_cate", names(wish.train))
-nn.train = cbind(wish.train[,-y_index], wish.train[,y_index])
+nn.train = cbind(wish.train[, -y_index], wish.train[, y_index])
 names(nn.train)[names(nn.train) == 'wish.train[, y_index]'] <- 'sold_ct_cate'
 
 
@@ -541,16 +542,13 @@ nn <- neuralnet(f,
 
 ```{r}
 plot(nn)
-
 ```
 
 ```{r}
-
-nn.test = cbind(wish.test[,-y_index], wish.test[,y_index])
+nn.test = cbind(wish.test[, -y_index], wish.test[, y_index])
 names(nn.test)[names(nn.test) == 'wish.test[, y_index]'] <- 'sold_ct_cate'
 
-
-nn.test = cbind(nn.test[, 1:8],class.ind(as.factor(nn.test$color)),nn.test[, 11:15],nn.test[17:24],class.ind(as.factor(nn.test$size)),class.ind(as.factor(nn.test$origin)), class.ind(as.factor(nn.test$sold_ct_cate)))
+nn.test = cbind(nn.test[, 1:8], class.ind(as.factor(nn.test$color)), nn.test[, 11:15], nn.test[17:24], class.ind(as.factor(nn.test$size)), class.ind(as.factor(nn.test$origin)), class.ind(as.factor(nn.test$sold_ct_cate)))
 #normalized by scaling data
 scl <- function(x){ (x - min(x))/(max(x) - min(x)) }
 nn.test[, 1:29] <- data.frame(lapply(nn.test[, 1:29], scl))
@@ -585,281 +583,3 @@ print("above 5k group accuracy:")
 sum(table.test[1,1]) /sum(table.test[1,])
 
 ```
-
-## Appendix
-
-#### Parameter Tuning
-```{r}
-# https://www.hackerearth.com/practice/machine-learning/machine-learning-algorithms/beginners-tutorial-on-xgboost-parameter-tuning-r/tutorial/
-
-```
-
-## Reference
-```{r}
-# GBM Hyperparamters
-learn_rate_opt <- c(0.01, 0.03)
-max_depth_opt <- c(3, 4, 5, 6, 9)
-sample_rate_opt <- c(0.7, 0.8, 0.9, 1.0)
-col_sample_rate_opt <- c(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
-hyper_params <- list(learn_rate = learn_rate_opt,
-                     max_depth = max_depth_opt,
-                     sample_rate = sample_rate_opt,
-                     col_sample_rate = col_sample_rate_opt)
-
-search_criteria <- list(strategy = "RandomDiscrete",
-                        max_models = 3,
-                        seed = 1)
-
-gbm_grid <- h2o.grid(algorithm = "gbm",
-                     grid_id = "gbm_grid_binomial",
-                     x = predictors,
-                     y = response,
-                     training_frame = wish.train.h2o,
-                     ntrees = 10,
-                     seed = 1,
-                     nfolds = 5,
-                     keep_cross_validation_predictions = TRUE,
-                     hyper_params = hyper_params,
-                     search_criteria = search_criteria)
-```
-
-```{r}
-ensemble <- h2o.stackedEnsemble(x = predictors,
-                                y = response,
-                                training_frame = wish.train.h2o,
-                                base_models = gbm_grid@model_ids)
-perf <- h2o.performance(ensemble, newdata = wish.test.h2o)
-perf
-# Compare to base learner performance on the test set
-# .getauc <- function(mm) h2o.auc(h2o.performance(h2o.getModel(mm), newdata = wish.test.h2o))
-# baselearner_aucs <- sapply(gbm_grid@model_ids, .getauc)
-# baselearner_best_auc_test <- max(baselearner_aucs)
-# ensemble_auc_test <- h2o.auc(perf)
-# print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
-# print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
-
-
-# # Generate predictions on a test set (if neccessary)
-# pred <- h2o.predict(ensemble, newdata = wish.test.h2o)
-```
-
-##### Random Forest with class weight (oversampliing)
-```{r}
-# adapt on random forest 
-# https://www.rdocumentation.org/packages/iRF/versions/2.0.0/topics/randomForest 
-set.seed(123)
-
-bag.wish_over <- randomForest(sold_ct_cate ~ ., data = wish.train, mtry = 25, importance = TRUE, classwt = c(0.2,0.2,0.2,0.2,0.2,0.2))
-bag.wish_over
-
-bag.pred_over <- predict(bag.wish_over, wish.test)
-
-table(bag.pred_over, wish.test$sold_ct_cate)
-
-print("Misclassification error rate on test set: ")
-
-1 - ((table(bag.pred_over, wish.test$sold_ct_cate)[1] + table(bag.pred_over, wish.test$sold_ct_cate)[8] + table(bag.pred_over, wish.test$sold_ct_cate)[15] + table(bag.pred_over, wish.test$sold_ct_cate)[22] + table(bag.pred_over, wish.test$sold_ct_cate)[29] + table(bag.pred_over, wish.test$sold_ct_cate)[36]) / nrow(wish.test))
-```
-
-```{r}
-library(rfUtilities)
-# https://www.rdocumentation.org/packages/rfUtilities/versions/2.1-5/topics/rf.crossValidation 
-rf.cv <- rf.crossValidation(bag.wish_over,  wish.train, p=0.10, n=99, ntree=501) 
-
- # Plot cross validation versus model producers accuracy
-par(mfrow=c(1,2)) 
- plot(rf.cv, type = "cv", main = "CV producers accuracy")
- plot(rf.cv, type = "model", main = "Model producers accuracy")
-
- # Plot cross validation versus model oob
-par(mfrow=c(1,2)) 
- plot(rf.cv, type = "cv", stat = "oob", main = "CV oob error")
- plot(rf.cv, type = "model", stat = "oob", main = "Model oob error")
-
-```
-
-#### cross validation 
-```{r}
-# https://www.geeksforgeeks.org/cross-validation-in-r-programming/ 
-library(caret) 
-set.seed(125)  
-  
-
-# value of K equal to 10 
-train_control <- trainControl(method = "cv", 
-                              number = 10) 
-  
-bag.wish_over <- train(sold_ct_cate ~., data = wish.train,  
-               method = "rf", 
-               trControl = train_control) 
-  
-# printing model performance metrics 
-# along with other details 
-print(bag.wish_over)
-
-```
-
-#### cv 
-```{r}
-cv.wish.tree = cv.tree(tree.wish, FUN = prune.misclass)
-cv.wish.tree
-plot(cv.wish.tree)
-# from the plot we can see the misclassification rate doesn't go down after n=3
-
-```
-
-```{r}
-prune.tree = prune.misclass(tree.wish, best = 3)
-plot(prune.tree)
-text(prune.tree, pretty=0)
-```
-
-
-
-```{r}
-tree.pred = predict(prune.tree, wish.test, type="class")
-
-confusion.matrix <- table(wish.test$sold_ct_3, tree.pred)
-print(confusion.matrix)
-
-accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-print(paste("accuracy:",accuracy.percent,"%"))
-# the result is satisfying- pruning doesn't hurt the prediction 
-```
-
-## Random Forest
-```{r}
-# wish.train$sold_ct_3
-# wish.train$sold_ct_3[which(is.na(wish.train$sold_ct_3))]
-```
-
-```{r}
-# rf.wish = randomForest(sold_ct_3~., data = wish.train)
-# https://stackoverflow.com/questions/38250440/error-in-na-fail-default-missing-values-in-object-but-no-missing-values
-# https://www.kaggle.com/nsecord/gbm-parameter-estimation
-rf.wish <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 25, importance = TRUE,na.action=na.roughfix)
-rf.wish
-```
-
-```{r}
-
-# https://www.geeksforgeeks.org/cross-validation-in-r-programming/ 
-library(caret) 
-set.seed(125)  
-  
-
-# value of K equal to 10 
-train_control <- trainControl(method = "cv", 
-                              number = 10) 
-  
-rf.wish.cv <- train(sold_ct_3 ~., data = wish.train,  
-               method = "rf", ,na.action=na.roughfix,
-               trControl = train_control) 
-  
-# printing model performance metrics 
-# along with other details 
-print(rf.wish.cv)
-
-```
-
-over sampling 
-```{r}
-set.seed(123)
-
-rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 24, importance = TRUE, classwt = c(0.33,0.33,0.33), na.action=na.roughfix)
-rf.wish.over
-
-rf.pred.over <- predict(rf.wish.over, wish.test)
-
-# table(rf.pred.over, wish.test$sold_ct_3)
-
-confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
-print(confusion.matrix)
-
-accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-print(paste("accuracy:",accuracy.percent,"%"))
-
-```
-
-To tune the model, we try different `mtry`. now mtry = 24 <br>
-it reaches the highest accuracy when mtry = 3 or 6, within the smallest mtry range, 
-```{r}
-
-accuracy = double(24)
-for(mtry in 1:24){
-  fit = randomForest(sold_ct_3~., data = wish.train, mtry=mtry,na.action=na.roughfix)
-  pred = predict(fit, wish.test)
-  confusion.matrix <- table(wish.test$sold_ct_3, pred)
-  accuracy[mtry] = 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-}
-
-accuracy
-matplot(1:mtry, accuracy, pch = 23, col= "blue", type = "b", ylab="Prediction Accuracy")
-legend("topright", legend =  "Test", pch = 23, col = "blue")
-
-# it reaches the highest accuracy when mtry = 4 or 5, within the smallest mtry range 
-
-```
-
-then we go with mtry = 5<br>
-when oversampled, the test accuracy is 77.05%. 
-```{r}
-set.seed(123)
-
-rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 5, importance = TRUE, classwt = c(0.33,0.33,0.33), na.action=na.roughfix)
-rf.wish.over
-
-rf.pred.over <- predict(rf.wish.over, wish.test)
-
-# table(rf.pred.over, wish.test$sold_ct_3)
-
-confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
-print(confusion.matrix)
-
-accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-print(paste("accuracy:",accuracy.percent,"%"))
-
-```
-
-
-```{r}
-set.seed(123)
-
-rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 5, importance = TRUE, classwt = c(0.1,0.9,0.9), na.action=na.roughfix)
-rf.wish.over
-
-rf.pred.over <- predict(rf.wish.over, wish.test)
-
-# table(rf.pred.over, wish.test$sold_ct_3)
-
-confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
-print(confusion.matrix)
-print(confusion.matrix[1,1])
-
-accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-above10k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
-print(paste("Test accuracy:",accuracy.percent,"%"))
-print(paste("Above 10k accuracy:",above10k.precent,"%"))
-
-```
-
-When not oversampled, the test accuracy is 78.36%, even slightly higher than the oversampled data.  
-```{r}
-set.seed(123)
-
-rf.wish.over <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 5, importance = TRUE, na.action=na.roughfix)
-rf.wish.over
-
-rf.pred.over <- predict(rf.wish.over, wish.test)
-
-# table(rf.pred.over, wish.test$sold_ct_3)
-
-confusion.matrix <- table(wish.test$sold_ct_3, rf.pred.over)
-print(confusion.matrix)
-
-accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-above10k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
-print(paste("Test accuracy:",accuracy.percent,"%"))
-print(paste("Above 10k accuracy:",above10k.precent,"%"))
-```
-
