@@ -18,7 +18,7 @@ library(ggcorrplot)
 library(stringr)
 ```
 
-### Data pre-processing
+## Data pre-processing
 ```{r, results='hide', echo=TRUE}
 wish <- read.csv('summer-products-with-rating-and-performance_2020-08.csv')
 
@@ -159,6 +159,7 @@ str(wish_cate)
 
 ```
 
+## Methodology
 
 #### 80:20 split for train and test set
 ```{r}
@@ -173,7 +174,32 @@ wish.train <- wish.train %>% drop_na(price)
 
 ```
 
-### Tree Models
+### Multinomial Regression
+
+```{r}
+set.seed(123)
+library(nnet)
+multinomial.mod <- multinom(sold_ct_cate ~ ., data = wish.train, na.action=na.roughfix) 
+summary(multinomial.mod)
+multinomial.pred_train <- predict(multinomial.mod, wish.train) 
+multinomial.pred_test <- predict(multinomial.mod, wish.test)
+# training error
+print("Misclassification rate on the training set:")
+mean(as.character(multinomial.pred_train) != as.character(wish.train$sold_ct_cate))
+# test error
+print("Misclassification rate on the test set:")
+mean(as.character(multinomial.pred_test) != as.character(wish.test$sold_ct_cate))
+
+confusion.matrix <- table(wish.test$sold_ct_cate, multinomial.pred_test)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+above5k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
+print(paste("Test accuracy:",accuracy.percent,"%"))
+print(paste("Above 5k accuracy:",above5k.precent,"%"))
+```
+
+### Dicision Tree Models
 
 ```{r}
 library(tree)
@@ -239,55 +265,9 @@ print(paste("Above 5k accuracy:",above5k.precent,"%"))
 
 ```
 
-### GBM
-
-```{r}
-library(gbm)
-boost.wish = gbm(sold_ct_cate~., data = wish.train, distribution = "multinomial", n.trees = 10000, shrinkage = 0.01, interaction.depth = 4)
-summary(boost.wish)
-
-boost.predP <- predict(boost.wish, wish.test, n.trees = 10000, type = 'response')
-
-classification <- c("above 5K", "below 100", "between 100 and 5k")
-boost.pred <- apply(boost.predP, 1, which.max)
-boost.pred <- classification[boost.pred]
-confusion.matrix <- table(wish.test$sold_ct_cate, boost.pred)
-print(confusion.matrix)
-
-accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-above5k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
-print(paste("Test accuracy:",accuracy.percent,"%"))
-print(paste("Above 5k accuracy:",above5k.precent,"%"))
-
-```
-
-### Multinomial regression
-
-```{r}
-set.seed(123)
-library(nnet)
-multinomial.mod <- multinom(sold_ct_cate ~ ., data = wish.train, na.action=na.roughfix) 
-summary(multinomial.mod)
-multinomial.pred_train <- predict(multinomial.mod, wish.train) 
-multinomial.pred_test <- predict(multinomial.mod, wish.test)
-# training error
-print("Misclassification rate on the training set:")
-mean(as.character(multinomial.pred_train) != as.character(wish.train$sold_ct_cate))
-# test error
-print("Misclassification rate on the test set:")
-mean(as.character(multinomial.pred_test) != as.character(wish.test$sold_ct_cate))
-
-confusion.matrix <- table(wish.test$sold_ct_cate, multinomial.pred_test)
-print(confusion.matrix)
-
-accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
-above5k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
-print(paste("Test accuracy:",accuracy.percent,"%"))
-print(paste("Above 5k accuracy:",above5k.precent,"%"))
-```
-
-
 ### SVM
+
+#### Linear
 
 ```{r}
 library(e1071)
@@ -322,6 +302,8 @@ sum(table[1,1]) /sum(table[1,])
 table(wish.test$sold_ct_cate, test_pred)
 ```
 
+#### Radial
+
 ```{r}
 # names(wish.train)
 set.seed(123)
@@ -354,6 +336,8 @@ table(wish.test$sold_ct_cate, test_pred)
 
 The result shows that it result overfitting. (traing error is getting low, but test error is getting higher)
 
+#### Polynomial
+
 ```{r}
 set.seed(123)
 tune.poly <- tune(svm, sold_ct_cate ~ ., data = wish.train, kernel = "poly", degree = 3, ranges = list(cost = append(seq(0.01, 15, by = 0.5), 10)))
@@ -381,8 +365,30 @@ sum(table[1,1]) /sum(table[1,])
 table(wish.test$sold_ct_cate, test_pred)
 ```
 
+### GBM
 
-## XGBoost
+```{r}
+library(gbm)
+boost.wish = gbm(sold_ct_cate~., data = wish.train, distribution = "multinomial", n.trees = 10000, shrinkage = 0.01, interaction.depth = 4)
+summary(boost.wish)
+
+boost.predP <- predict(boost.wish, wish.test, n.trees = 10000, type = 'response')
+
+classification <- c("above 5K", "below 100", "between 100 and 5k")
+boost.pred <- apply(boost.predP, 1, which.max)
+boost.pred <- classification[boost.pred]
+confusion.matrix <- table(wish.test$sold_ct_cate, boost.pred)
+print(confusion.matrix)
+
+accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
+above5k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
+print(paste("Test accuracy:",accuracy.percent,"%"))
+print(paste("Above 5k accuracy:",above5k.precent,"%"))
+
+```
+
+### XGBoost
+
 ```{r, message = FALSE}
 library(xgboost)
 # Create numeric labels with one-hot encoding
@@ -445,7 +451,62 @@ cat("XGB Validation Classification Error Rate - above 5k:", xgb_val_conf[1,1]/su
 
 ```
 
-# Neural network
+### Stacked Ensembles 
+
+```{r}
+# we already have gbm.wish for GBM, now build RF model
+# https://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/stacked-ensembles.html
+# Stacked Ensemble model's performance is not so different from those of base learners' 
+library(h2o)
+h2o.init()
+
+wish.train.h2o <- as.h2o(wish.train)
+wish.test.h2o <- as.h2o(wish.test)
+predictors <- c(colnames(wish.train)[1:length(wish.train) - 1])
+response <- "sold_ct_cate"
+
+set.seed(123)
+
+gbm.wish <- h2o.gbm(x = predictors,
+                    y = response,
+                    nfolds = 5,
+                    distribution = "multinomial",
+                    keep_cross_validation_predictions = TRUE,
+                    training_frame = wish.train.h2o, seed=1)
+
+rf.wish <- h2o.randomForest(x = predictors,
+                          y = response,
+                          training_frame = wish.train.h2o,
+                          ntrees = 50,
+                          nfolds = 5,
+                          keep_cross_validation_predictions = TRUE,
+                          seed = 1)
+
+ensemble <- h2o.stackedEnsemble(x = predictors,
+                                y = response,
+                                training_frame = wish.train.h2o,
+                                base_models = list(gbm.wish, rf.wish))
+
+perf <- h2o.performance(ensemble, newdata = wish.test.h2o)
+
+# Compare to base learner performance on the test set
+perf_gbm_test <- h2o.performance(gbm.wish, newdata = wish.test.h2o)
+perf_rf_test <- h2o.performance(rf.wish, newdata = wish.test.h2o)
+baselearner_best_auc_test <- max(h2o.auc(perf_gbm_test), h2o.auc(perf_rf_test))
+ensemble_auc_test <- h2o.auc(perf)
+print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
+print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
+
+perf
+perf_gbm_test
+perf_rf_test
+
+# Generate predictions on a test set 
+pred <- h2o.predict(ensemble, newdata = wish.test.h2o)
+```
+
+### Neural network
+
 ```{r}
 library(neuralnet)
 library(nnet)
@@ -525,109 +586,15 @@ sum(table.test[1,1]) /sum(table.test[1,])
 
 ```
 
+## Appendix
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#Parameter Tuning
+#### Parameter Tuning
 ```{r}
 # https://www.hackerearth.com/practice/machine-learning/machine-learning-algorithms/beginners-tutorial-on-xgboost-parameter-tuning-r/tutorial/
 
 ```
 
-
-
-
-
-##Boosting 
-```{r}
-
-boost.wish = gbm(sold_ct_cate~., data = wish.train, distribution = "gaussian", n.trees = 10000, shrinkage = 0.01, interaction.depth = 4)
-summary(boost.wish)
-
-```
-
-
-
-```{r}
-plot(boost.wish,i="seller_rate_ct")
-plot(boost.wish,i="color")
-
-
-```
-
-
-### Appendix
-
-
-
-## Stacked Ensembles 
-```{r}
-# we already have gbm.wish for GBM, now build RF model
-# https://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/stacked-ensembles.html
-# Stacked Ensemble model's performance is not so different from those of base learners' 
-library(h2o)
-h2o.init()
-
-wish.train.h2o <- as.h2o(wish.train)
-wish.test.h2o <- as.h2o(wish.test)
-predictors <- c(colnames(wish.train)[1:length(wish.train) - 1])
-response <- "sold_ct_cate"
-
-set.seed(123)
-
-gbm.wish <- h2o.gbm(x = predictors,
-                    y = response,
-                    nfolds = 5,
-                    distribution = "multinomial",
-                    keep_cross_validation_predictions = TRUE,
-                    training_frame = wish.train.h2o, seed=1)
-
-rf.wish <- h2o.randomForest(x = predictors,
-                          y = response,
-                          training_frame = wish.train.h2o,
-                          ntrees = 50,
-                          nfolds = 5,
-                          keep_cross_validation_predictions = TRUE,
-                          seed = 1)
-
-ensemble <- h2o.stackedEnsemble(x = predictors,
-                                y = response,
-                                training_frame = wish.train.h2o,
-                                base_models = list(gbm.wish, rf.wish))
-
-perf <- h2o.performance(ensemble, newdata = wish.test.h2o)
-
-# Compare to base learner performance on the test set
-perf_gbm_test <- h2o.performance(gbm.wish, newdata = wish.test.h2o)
-perf_rf_test <- h2o.performance(rf.wish, newdata = wish.test.h2o)
-baselearner_best_auc_test <- max(h2o.auc(perf_gbm_test), h2o.auc(perf_rf_test))
-ensemble_auc_test <- h2o.auc(perf)
-print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
-print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
-
-perf
-perf_gbm_test
-perf_rf_test
-
-# Generate predictions on a test set (not sure if neccessary)
-pred <- h2o.predict(ensemble, newdata = wish.test.h2o)
-```
-
-# Reference
+## Reference
 ```{r}
 # GBM Hyperparamters
 learn_rate_opt <- c(0.01, 0.03)
@@ -656,7 +623,6 @@ gbm_grid <- h2o.grid(algorithm = "gbm",
                      search_criteria = search_criteria)
 ```
 
-
 ```{r}
 ensemble <- h2o.stackedEnsemble(x = predictors,
                                 y = response,
@@ -677,13 +643,7 @@ perf
 # pred <- h2o.predict(ensemble, newdata = wish.test.h2o)
 ```
 
-
-
-
-
-
-
-## Random Forest with class weight (oversampliing)
+##### Random Forest with class weight (oversampliing)
 ```{r}
 # adapt on random forest 
 # https://www.rdocumentation.org/packages/iRF/versions/2.0.0/topics/randomForest 
@@ -700,8 +660,6 @@ print("Misclassification error rate on test set: ")
 
 1 - ((table(bag.pred_over, wish.test$sold_ct_cate)[1] + table(bag.pred_over, wish.test$sold_ct_cate)[8] + table(bag.pred_over, wish.test$sold_ct_cate)[15] + table(bag.pred_over, wish.test$sold_ct_cate)[22] + table(bag.pred_over, wish.test$sold_ct_cate)[29] + table(bag.pred_over, wish.test$sold_ct_cate)[36]) / nrow(wish.test))
 ```
-
-
 
 ```{r}
 library(rfUtilities)
@@ -720,9 +678,7 @@ par(mfrow=c(1,2))
 
 ```
 
-
-
-## cross validation 
+#### cross validation 
 ```{r}
 # https://www.geeksforgeeks.org/cross-validation-in-r-programming/ 
 library(caret) 
@@ -743,9 +699,7 @@ print(bag.wish_over)
 
 ```
 
-
-
-#cv 
+#### cv 
 ```{r}
 cv.wish.tree = cv.tree(tree.wish, FUN = prune.misclass)
 cv.wish.tree
@@ -754,19 +708,15 @@ plot(cv.wish.tree)
 
 ```
 
-
 ```{r}
-
 prune.tree = prune.misclass(tree.wish, best = 3)
 plot(prune.tree)
 text(prune.tree, pretty=0)
-
 ```
 
 
 
 ```{r}
-
 tree.pred = predict(prune.tree, wish.test, type="class")
 
 confusion.matrix <- table(wish.test$sold_ct_3, tree.pred)
@@ -776,7 +726,6 @@ accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
 print(paste("accuracy:",accuracy.percent,"%"))
 # the result is satisfying- pruning doesn't hurt the prediction 
 ```
-
 
 ## Random Forest
 ```{r}
@@ -791,8 +740,6 @@ print(paste("accuracy:",accuracy.percent,"%"))
 rf.wish <- randomForest(sold_ct_3 ~ ., data = wish.train, mtry = 25, importance = TRUE,na.action=na.roughfix)
 rf.wish
 ```
-
-
 
 ```{r}
 
@@ -833,7 +780,6 @@ accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
 print(paste("accuracy:",accuracy.percent,"%"))
 
 ```
-
 
 To tune the model, we try different `mtry`. now mtry = 24 <br>
 it reaches the highest accuracy when mtry = 3 or 6, within the smallest mtry range, 
@@ -915,52 +861,5 @@ accuracy.percent <- 100*sum(diag(confusion.matrix))/sum(confusion.matrix)
 above10k.precent <- 100*confusion.matrix[1,1]/sum(confusion.matrix[1,])
 print(paste("Test accuracy:",accuracy.percent,"%"))
 print(paste("Above 10k accuracy:",above10k.precent,"%"))
-```
-
-
-
-
-
-```{r}
-
-
-```
-
-
-
-```{r}
-
-
-
-```
-
-
-
-
-```{r}
-
-
-
-```
-
-
-```{r}
-
-
-
-```
-
-
-
-```{r}
-
-
-
-```
-
-
-
-```{r}
-
 ```
 
